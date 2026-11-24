@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}日志{% endblock %}
+{% block body %}
+<div class="card">
+<h1>系统日志</h1>
+<table>
+  <tr><th style="width:150px">时间</th><th style="width:120px">机器</th><th style="width:70px">级别</th><th>内容</th></tr>
+  {% for l in logs %}
+  <tr>
+    <td class="muted">{{ l.created_at|todate }}</td>
+    <td class="mono">{{ l.hostname }}</td>
+    <td>
+      {% if l.level=='error' %}<span class="tag no">错误</span>
+      {% elif l.level=='warn' %}<span class="tag warn">警告</span>
+      {% else %}<span class="tag info">信息</span>{% endif %}
+    </td>
+    <td>{{ l.msg }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">暂无日志</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

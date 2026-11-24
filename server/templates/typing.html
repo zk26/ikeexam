@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}打字统计{% endblock %}
+{% block body %}
+
+<div class="row" style="justify-content:space-between;margin-bottom:12px">
+  <h1 style="margin:0">打字统计 <span class="muted" style="font-size:14px;font-weight:400">「{{ exam.title }}」</span></h1>
+  <div class="bar" style="margin:0">
+    <span class="tag info" id="examStatus">{{ exam.status }}</span>
+    <span class="tag gray" id="remaining">--:--</span>
+    <a class="btn ghost sm" href="/screen" target="_blank">投屏大屏</a>
+    <a class="btn ghost sm" href="/">返回控制台</a>
+  </div>
+</div>
+
+<p class="muted" style="margin:0 0 12px">
+  打字练习<b>不计分</b>。这里看每个同学的汇总表现：
+  <b>做了多少</b>（完成几项/共几项）、<b>正确率</b>、<b>用时</b>、<b>平均速度</b>，
+  以及综合评分（打字 = 正确率 60% + 速度 40%，25 字/分算速度满分；打地鼠 = 命中率）。
+  学生端做完一项就上报一次，本页每 3 秒刷新。
+</p>
+
+<div class="card" id="summaryCard" style="margin-bottom:12px">
+  <div style="display:flex;gap:24px;flex-wrap:wrap" id="summaryRow">
+    <span class="muted">等待数据…</span>
+  </div>
+</div>
+
+<div class="card">
+  <table id="board" style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr id="boardHead" style="text-align:left;border-bottom:2px solid var(--line)"></tr>
+    </thead>
+    <tbody id="boardBody">
+      <tr><td colspan="8" class="muted" style="padding:16px">还没有学生数据，等学生进打字练习后自动出现</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .cell-ok  { color: var(--green, #15803d); font-weight: 600; }
+  .cell-bad { color: var(--red, #dc2626); }
+  .cell-dim { color: var(--ink-3, #5f6b7d); }
+  #board td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  #board tr { transition: background var(--t, .16s ease); }
+  #board tr:hover td { background: var(--brand-50, #eff6ff); }
+  .prog { font-size: 12px; color: var(--ink-3, #5f6b7d); }
+  .score-pill{display:inline-block;min-width:44px;text-align:center;padding:2px 8px;
+              border-radius:12px;font-weight:700;border:1px solid transparent}
+  .score-hi{background:var(--green-l,#f0fdf4);color:var(--green-d,#166534);
+            border-color:#bbf7d0}
+  .score-mid{background:var(--amber-l,#fffbeb);color:#b45309;border-color:#fde68a}
+  .score-lo{background:var(--red-l,#fef2f2);color:#b91c1c;border-color:#fecaca}
+</style>
+
+<script>
+var EID = {{ exam.id }};
+
+function fmtClock(sec){
+  if(sec === null || sec === undefined) return "--:--";
+  sec = Math.max(0, Math.floor(sec));
+  var m = Math.floor(sec/60), s = sec%60;
+  return (m<10?"0":"")+m+":"+(s<10?"0":"")+s;
+}
+
+function fmtTime(ts){
+  if(!ts) return "-";
+  var d = new Date(ts*1000);
+  function p(n){ return (n<10?"0":"")+n; }
+  return p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+}
+
+function esc(s){
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+/* 任务在整场里的固定序号：只勾了几项时序号也保持 ①②③④⑤⑥ 不乱 */
+var TASK_NO = {whack_mole:"①", key_press:"②", case_press:"③", typing_en:"④",
+               typing_zh:"⑤", name_typing:"⑥"};
+var TASK_ORDER = ["whack_mole", "key_press", "case_press", "typing_en",
+                  "typing_zh", "name_typing"];
+
+function taskLabel(d, k){
+  return (TASK_NO[k] || "") + " " + ((d.task_name || {})[k] || k);
+}
+
+/* 一个学生的汇总：做了几项 / 正确率 / 用时 / 速度 / 综合分 */
+function summarize(r){
+  var tk = r.tasks || {};
+  var order = TASK_ORDER.filter(function(k){ return tk[k]; });
+  var total = Object.keys(tk).length;
+  var done = 0, accSum = 0, accN = 0, wpmSum = 0, wpmN = 0, mins = 0, marks = "";
+  var scoreSum = 0, scoreN = 0;
+  Object.keys(tk).forEach(function(k){
+    var t = tk[k];
+    mins += (t.elapsed_ms || 0) / 60000;
+    if(t.finished){ done++; marks += (TASK_NO[k]||"") + "✅ "; }
+    else { marks += (TASK_NO[k]||"") + "· "; }
+    var acc = (t.accuracy !== null && t.accuracy !== undefined)
+              ? t.accuracy : null;
+    if(acc !== null){ accSum += acc; accN++; }
+    if(t.wpm){ wpmSum += t.wpm; wpmN++; }
+    if(acc !== null){
+      // 每项各自打分再平均：打地鼠只看命中率；
+      // 打字类 = 正确率 60% + 速度 40%（25 字/分 = 速度满分）
+      if(k === "whack_mole"){
+        scoreSum += acc;
+      } else {
+        var sp = t.wpm ? Math.min(t.wpm / 25, 1) * 100 : 0;
+        scoreSum += acc * 0.6 + sp * 0.4;
+      }
+      scoreN++;
+    }
+  });
+  var acc = accN ? accSum / accN : 0;
+  var wpm = wpmN ? wpmSum / wpmN : 0;
+  var overall = scoreN ? round1(scoreSum / scoreN) : 0;
+  return {total: total, done: done, acc: Math.round(acc), wpm: Math.round(wpm),
+          mins: mins, overall: overall, marks: marks.trim()};
+}
+
+function round1(x){ return Math.round(x * 10) / 10; }
+
+function scoreCls(s){
+  return s >= 80 ? "score-hi" : (s >= 60 ? "score-mid" : "score-lo");
+}
+
+function render(d){
+  if(!d.ok) return;
+  document.getElementById('examStatus').textContent =
+    {running:"进行中", paused:"已暂停", stopped:"已结束", draft:"未开始"}[d.exam.status] || d.exam.status;
+  document.getElementById('remaining').textContent = "剩余 " + fmtClock(d.exam.remaining);
+
+  /* 表头：座位 / 姓名 / 状态 / 完成情况 / 正确率 / 用时 / 平均速度 / 综合评分 */
+  var head = '<th style="padding:8px">座位</th><th style="padding:8px">姓名</th>'
+           + '<th style="padding:8px">状态</th>'
+           + '<th style="padding:8px">做了多少</th>'
+           + '<th style="padding:8px">正确率</th>'
+           + '<th style="padding:8px">用时</th>'
+           + '<th style="padding:8px">平均速度</th>'
+           + '<th style="padding:8px">综合评分</th>';
+  document.getElementById('boardHead').innerHTML = head;
+
+  var body = document.getElementById('boardBody');
+  if(!d.rows.length){
+    body.innerHTML = '<tr><td colspan="8" class="muted" style="padding:16px">本场考试还没有绑定的学生</td></tr>';
+  } else {
+    var html = "";
+    d.rows.forEach(function(r){
+      var s = summarize(r);
+      var accCls = s.acc >= 90 ? "cell-ok" : (s.acc >= 60 ? "" : "cell-bad");
+      var started = s.total > 0;
+      html += '<tr>'
+        + '<td>' + esc(r.seat || "-") + '</td>'
+        + '<td><b>' + esc(r.name || r.hostname) + '</b>'
+        +   '<div class="prog">' + esc(s.marks || '未开始') + '</div></td>'
+        + '<td>' + (r.online ? '<span class="cell-ok">在线</span>'
+                            : '<span class="cell-dim">离线</span>') + '</td>'
+        + '<td>' + (started
+             ? '<b>' + s.done + ' / ' + s.total + '</b> 项'
+               + (s.done === s.total ? ' <span class="cell-ok">全部完成</span>' : '')
+             : '<span class="cell-dim">未开始</span>') + '</td>'
+        + '<td>' + (started
+             ? '<span class="' + accCls + '">' + s.acc + '%</span>'
+             : '<span class="cell-dim">-</span>') + '</td>'
+        + '<td>' + (started ? s.mins.toFixed(1) + ' 分'
+                            : '<span class="cell-dim">-</span>') + '</td>'
+        + '<td>' + (started && s.wpm ? '<b>' + s.wpm + '</b> 字/分'
+                            : '<span class="cell-dim">-</span>') + '</td>'
+        + '<td>' + (started
+             ? '<span class="score-pill ' + scoreCls(s.overall) + '">'
+               + s.overall + '</span>'
+             : '<span class="cell-dim">-</span>') + '</td>'
+        + '</tr>';
+    });
+    body.innerHTML = html;
+  }
+
+  /* 全班概览：平均完成项数 / 平均正确率 / 平均用时 / 平均综合分 */
+  var n = 0, doneSum = 0, accSum = 0, minSum = 0, ovSum = 0, best = null;
+  d.rows.forEach(function(r){
+    var s = summarize(r);
+    if(!s.total) return;
+    n++;
+    doneSum += s.done;
+    accSum += s.acc;
+    minSum += s.mins;
+    ovSum += s.overall;
+    if(!best || s.overall > best.s.overall) best = {r: r, s: s};
+  });
+  function avg(a){ return n ? round1(a / n) : 0; }
+  var sh;
+  if(!n){
+    sh = '<span class="muted">还没有学生开始打字练习</span>';
+  } else {
+    sh = '<span>已开始 <b>' + n + '</b> 人</span>'
+       + '<span>平均完成 <b>' + avg(doneSum) + '</b> 项</span>'
+       + '<span>平均正确率 <b>' + avg(accSum) + '%</b></span>'
+       + '<span>平均用时 <b>' + avg(minSum) + '</b> 分</span>'
+       + '<span>平均综合评分 <b>' + avg(ovSum) + '</b></span>';
+    if(best){
+      sh += '<span class="cell-ok">最佳：' + esc(best.r.name || best.r.hostname)
+          + '（' + best.s.overall + ' 分，' + best.s.wpm + ' 字/分，'
+          + best.s.acc + '%）</span>';
+    }
+  }
+  document.getElementById('summaryRow').innerHTML = sh;
+}
+
+function poll(){
+  fetch("/exam/" + EID + "/typing.json")
+    .then(function(r){ return r.json(); })
+    .then(render)
+    .catch(function(){});
+}
+poll();
+setInterval(poll, 3000);
+</script>
+{% endblock %}

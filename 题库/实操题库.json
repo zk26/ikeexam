@@ -1,0 +1,1120 @@
+[
+  {
+    "name": "期末成绩统计（基础）",
+    "etype": "excel",
+    "category": "二级·表格",
+    "level": "基础",
+    "materials": [
+      "成绩表_基础_素材.xlsx"
+    ],
+    "save_as": "座位号_姓名.xlsx",
+    "requirement": "【WPS 表格】期末成绩统计（基础）\n\n1. 下载素材并用 WPS 表格打开\n2. 工作表名改为「成绩表」\n3. F2、G2 分别输入「总分」「平均分」\n4. 用 SUM 求每人总分（F3:F7）\n5. 用 AVERAGE 求每人平均分（G3:G7），保留 1 位小数\n6. 表头 A2:G2：黑体、14 号、加粗、水平居中\n7. A1:G1 合并后居中\n8. A2:G7 加外边框\n9. 保存为 座位号_姓名.xlsx 并提交",
+    "checks": [
+      {
+        "id": "工作表改名",
+        "type": "sheet_name",
+        "expect": {
+          "name": "成绩表"
+        },
+        "score": 10
+      },
+      {
+        "id": "总分公式",
+        "type": "formula",
+        "cell": "F3",
+        "expect": {
+          "function": "SUM"
+        },
+        "score": 15
+      },
+      {
+        "id": "平均分公式",
+        "type": "formula",
+        "cell": "G3",
+        "expect": {
+          "function": "AVERAGE"
+        },
+        "score": 15
+      },
+      {
+        "id": "表头字体",
+        "type": "font",
+        "range": "A2:G2",
+        "expect": {
+          "name": "黑体",
+          "size": 14,
+          "bold": true
+        },
+        "score": 15
+      },
+      {
+        "id": "表格边框",
+        "type": "border",
+        "range": "A2:G7",
+        "score": 15
+      },
+      {
+        "id": "标题合并",
+        "type": "merged",
+        "range": "A1:G1",
+        "score": 10
+      },
+      {
+        "id": "表头居中",
+        "type": "alignment",
+        "range": "A2:G2",
+        "expect": {
+          "horizontal": "居中"
+        },
+        "score": 10
+      },
+      {
+        "id": "平均分1位小数",
+        "type": "number_format",
+        "range": "G3:G7",
+        "expect": {
+          "format": "0.0"
+        },
+        "score": 10
+      }
+    ]
+  },
+  {
+    "name": "期末成绩统计（进阶）",
+    "etype": "excel",
+    "category": "二级·表格",
+    "level": "进阶",
+    "materials": [
+      "成绩表_进阶_素材.xlsx"
+    ],
+    "save_as": "座位号_姓名.xlsx",
+    "requirement": "【WPS 表格】期末成绩统计（进阶）\n\n素材里基础部分已做好（改名、总分、平均分、格式），请继续：\n\n1. H2、I2 分别输入「评级」「排名」\n2. 用 IF 判断评级（H3:H7）：总分≥400 为「优秀」，否则「合格」\n3. 用 RANK 求排名（I3:I7）：按 F3:F7 降序\n4. H2:I2 表头：黑体、14 号、加粗、水平居中\n5. 给 A2:I7 全部加上外边框\n6. 插入一张柱形图（数据用 F 列总分）\n7. 保存为 座位号_姓名.xlsx 并提交",
+    "checks": [
+      {
+        "id": "评级IF",
+        "type": "formula",
+        "cell": "H3",
+        "expect": {
+          "function": "IF"
+        },
+        "score": 25
+      },
+      {
+        "id": "排名RANK",
+        "type": "formula",
+        "cell": "I3",
+        "expect": {
+          "function": "RANK"
+        },
+        "score": 25
+      },
+      {
+        "id": "新表头字体",
+        "type": "font",
+        "range": "H2:I2",
+        "expect": {
+          "name": "黑体",
+          "size": 14,
+          "bold": true
+        },
+        "score": 15
+      },
+      {
+        "id": "全表边框",
+        "type": "border",
+        "range": "A2:I7",
+        "score": 20
+      },
+      {
+        "id": "图表",
+        "type": "chart",
+        "expect": {
+          "count": 1
+        },
+        "score": 15
+      }
+    ]
+  },
+  {
+    "name": "图书销售统计（基础·含图表）",
+    "etype": "excel",
+    "category": "二级·表格",
+    "level": "基础",
+    "materials": [
+      "销售数据_基础_素材.xlsx"
+    ],
+    "save_as": "座位号_姓名.xlsx",
+    "requirement": "【WPS 表格】图书销售统计（基础）\n\n1. 下载素材并打开\n2. 工作表名改为「销售统计」\n3. E1 输入「合计」，用 SUM 求每月合计（E2:E7）\n4. 第 8 行总计：A8 输入「合计」，B8:E8 用 SUM 求各列总和\n5. 表头 A1:E1：黑体、12 号、加粗、水平居中\n6. A1:E8 加外边框\n7. 插入柱形图（数据 B1:D7，月份为横轴）\n8. 保存为 座位号_姓名.xlsx 并提交",
+    "checks": [
+      {
+        "id": "工作表改名",
+        "type": "sheet_name",
+        "expect": {
+          "name": "销售统计"
+        },
+        "score": 10
+      },
+      {
+        "id": "每月合计",
+        "type": "formula",
+        "cell": "E2",
+        "expect": {
+          "function": "SUM"
+        },
+        "score": 15
+      },
+      {
+        "id": "总计行",
+        "type": "formula",
+        "cell": "B8",
+        "expect": {
+          "function": "SUM"
+        },
+        "score": 15
+      },
+      {
+        "id": "图表",
+        "type": "chart",
+        "expect": {
+          "count": 1
+        },
+        "score": 20
+      },
+      {
+        "id": "表头字体",
+        "type": "font",
+        "range": "A1:E1",
+        "expect": {
+          "name": "黑体",
+          "size": 12,
+          "bold": true
+        },
+        "score": 15
+      },
+      {
+        "id": "表格边框",
+        "type": "border",
+        "range": "A1:E8",
+        "score": 15
+      },
+      {
+        "id": "表头居中",
+        "type": "alignment",
+        "range": "A1:E1",
+        "expect": {
+          "horizontal": "居中"
+        },
+        "score": 10
+      }
+    ]
+  },
+  {
+    "name": "图书销售统计（进阶）",
+    "etype": "excel",
+    "category": "二级·表格",
+    "level": "进阶",
+    "materials": [
+      "销售数据_进阶_素材.xlsx"
+    ],
+    "save_as": "座位号_姓名.xlsx",
+    "requirement": "【WPS 表格】图书销售统计（进阶）\n\n素材里合计和图表已做好，请继续：\n\n1. F1 输入「是否达标」\n2. 用 IF 判断（F2:F7）：合计≥500 为「达标」，否则「未达标」\n3. A9 输入「最高月销量」，B9 用 MAX 求 B2:B7 的最大值\n4. F1 表头：黑体、12 号、加粗、水平居中\n5. 给 A1:F8 全部加外边框\n6. 保存为 座位号_姓名.xlsx 并提交",
+    "checks": [
+      {
+        "id": "达标IF",
+        "type": "formula",
+        "cell": "F2",
+        "expect": {
+          "function": "IF"
+        },
+        "score": 30
+      },
+      {
+        "id": "最大值MAX",
+        "type": "formula",
+        "cell": "B9",
+        "expect": {
+          "function": "MAX"
+        },
+        "score": 30
+      },
+      {
+        "id": "表头字体",
+        "type": "font",
+        "range": "F1",
+        "expect": {
+          "name": "黑体",
+          "size": 12,
+          "bold": true
+        },
+        "score": 15
+      },
+      {
+        "id": "全表边框",
+        "type": "border",
+        "range": "A1:F8",
+        "score": 15
+      },
+      {
+        "id": "表头居中",
+        "type": "alignment",
+        "range": "F1",
+        "expect": {
+          "horizontal": "居中"
+        },
+        "score": 10
+      }
+    ]
+  },
+  {
+    "name": "通知排版（基础）",
+    "etype": "word",
+    "category": "二级·文字",
+    "level": "基础",
+    "materials": [
+      "通知_基础_素材.docx"
+    ],
+    "save_as": "座位号_姓名.docx",
+    "requirement": "【WPS 文字】通知排版（基础）\n\n1. 下载素材并打开\n2. 标题：黑体、二号、加粗、居中\n3. 正文前两段：宋体、小四（12 磅）\n4. 正文首行缩进 2 字符（24 磅），行距 1.5 倍\n5. 页面：A4（21×29.7 厘米），左右页边距 3.17 厘米\n6. 页脚插入「雅安中学教务处 制」\n7. 保存为 座位号_姓名.docx 并提交\n\n⚠️ 只改格式，不要删改文字",
+    "checks": [
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "校园科技节的通知",
+        "expect": {
+          "name": "黑体",
+          "size": "二号",
+          "bold": true
+        },
+        "score": 20
+      },
+      {
+        "id": "标题居中",
+        "type": "paragraph",
+        "contains": "校园科技节的通知",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 10
+      },
+      {
+        "id": "正文缩进行距",
+        "type": "paragraph",
+        "contains": "丰富校园文化生活",
+        "expect": {
+          "first_line_indent": 24,
+          "line_spacing": 1.5
+        },
+        "score": 20
+      },
+      {
+        "id": "正文字体",
+        "type": "font",
+        "contains": "丰富校园文化生活",
+        "expect": {
+          "name": "宋体",
+          "size": 12
+        },
+        "score": 15
+      },
+      {
+        "id": "页面设置",
+        "type": "page_setup",
+        "expect": {
+          "width": 21.0,
+          "height": 29.7,
+          "margin_left": 3.17,
+          "margin_right": 3.17
+        },
+        "score": 20
+      },
+      {
+        "id": "页脚",
+        "type": "header_footer",
+        "where": "footer",
+        "contains": "教务处",
+        "score": 15
+      }
+    ]
+  },
+  {
+    "name": "通知排版（进阶）",
+    "etype": "word",
+    "category": "二级·文字",
+    "level": "进阶",
+    "materials": [
+      "通知_进阶_素材.docx",
+      "素材图片_校徽.png"
+    ],
+    "save_as": "座位号_姓名.docx",
+    "requirement": "【WPS 文字】通知排版（进阶）\n\n素材已排好版，请继续：\n\n1. 页眉插入「雅安中学教务处」\n2. 在文档末尾插入一个 3 行 4 列的表格\n3. 在表格下方插入一张图片（用素材里的 素材图片_校徽.png）\n4. 保存为 座位号_姓名.docx 并提交",
+    "checks": [
+      {
+        "id": "页眉",
+        "type": "header_footer",
+        "where": "header",
+        "contains": "雅安中学教务处",
+        "score": 35
+      },
+      {
+        "id": "表格3行4列",
+        "type": "table",
+        "expect": {
+          "count": 1,
+          "rows": 3,
+          "cols": 4
+        },
+        "score": 35
+      },
+      {
+        "id": "插入图片",
+        "type": "image",
+        "expect": {
+          "count": 1
+        },
+        "score": 30
+      }
+    ]
+  },
+  {
+    "name": "课程表制作（基础）",
+    "etype": "word",
+    "category": "二级·文字",
+    "level": "基础",
+    "materials": [
+      "课程表_基础_素材.docx"
+    ],
+    "save_as": "座位号_姓名.docx",
+    "requirement": "【WPS 文字】课程表制作（基础）\n\n1. 下载素材并打开\n2. 标题「高一（3）班课程表」：黑体、二号、居中\n3. 标题下方插入一个 7 行 6 列的表格\n4. 表格第一行依次填入：节次、星期一、星期二、星期三、星期四、星期五\n5. 保存为 座位号_姓名.docx 并提交",
+    "checks": [
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "课程表",
+        "expect": {
+          "name": "黑体",
+          "size": "二号"
+        },
+        "score": 25
+      },
+      {
+        "id": "标题居中",
+        "type": "paragraph",
+        "contains": "课程表",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 15
+      },
+      {
+        "id": "表格7行6列",
+        "type": "table",
+        "expect": {
+          "count": 1,
+          "rows": 7,
+          "cols": 6
+        },
+        "score": 40
+      },
+      {
+        "id": "表头第一节次",
+        "type": "table",
+        "expect": {
+          "cell": [
+            0,
+            0,
+            "节次"
+          ]
+        },
+        "score": 20
+      }
+    ]
+  },
+  {
+    "name": "科技节宣传（基础）",
+    "etype": "ppt",
+    "category": "二级·演示",
+    "level": "基础",
+    "materials": [
+      "科技节_基础_素材.pptx"
+    ],
+    "save_as": "座位号_姓名.pptx",
+    "requirement": "【WPS 演示】科技节宣传（基础）\n\n1. 下载素材并打开\n2. 第 1 页标题改为「雅安中学科技节」\n3. 第 1 页标题：微软雅黑、40 磅、加粗、居中\n4. 第 1 页背景设为纯色：深蓝（RGB 1F4E79）\n5. 新增两页，标题分别为「参赛对象」「奖项设置」\n6. 共 5 页\n7. 保存为 座位号_姓名.pptx 并提交",
+    "checks": [
+      {
+        "id": "共5页",
+        "type": "slide_count",
+        "expect": {
+          "count": 5
+        },
+        "score": 20
+      },
+      {
+        "id": "首页标题",
+        "type": "title",
+        "index": 0,
+        "expect": {
+          "text": "雅安中学科技节"
+        },
+        "score": 15
+      },
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "雅安中学科技节",
+        "expect": {
+          "name": "微软雅黑",
+          "size": 40,
+          "bold": true
+        },
+        "score": 20
+      },
+      {
+        "id": "标题居中",
+        "type": "align",
+        "contains": "雅安中学科技节",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 10
+      },
+      {
+        "id": "背景色",
+        "type": "background",
+        "index": 0,
+        "expect": {
+          "color": "1F4E79"
+        },
+        "score": 20
+      },
+      {
+        "id": "新增页内容",
+        "type": "text",
+        "contains": [
+          "参赛对象",
+          "奖项设置"
+        ],
+        "score": 15
+      }
+    ]
+  },
+  {
+    "name": "科技节宣传（进阶）",
+    "etype": "ppt",
+    "category": "二级·演示",
+    "level": "进阶",
+    "materials": [
+      "科技节_进阶_素材.pptx",
+      "素材图片_校徽.png"
+    ],
+    "save_as": "座位号_姓名.pptx",
+    "requirement": "【WPS 演示】科技节宣传（进阶）\n\n素材已有 5 页（含标题、背景），请继续：\n\n1. 新增一页，标题「项目安排」，插入 3 行 3 列的表格\n2. 再新增一页，标题「科技节海报」，插入素材图片 素材图片_校徽.png\n3. 共 7 页\n4. 保存为 座位号_姓名.pptx 并提交",
+    "checks": [
+      {
+        "id": "共7页",
+        "type": "slide_count",
+        "expect": {
+          "count": 7
+        },
+        "score": 25
+      },
+      {
+        "id": "表格页标题",
+        "type": "title",
+        "index": 5,
+        "expect": {
+          "text": "项目安排"
+        },
+        "score": 15
+      },
+      {
+        "id": "表格3行3列",
+        "type": "table",
+        "expect": {
+          "count": 1,
+          "rows": 3,
+          "cols": 3
+        },
+        "score": 30
+      },
+      {
+        "id": "插入图片",
+        "type": "image",
+        "expect": {
+          "count": 1
+        },
+        "score": 30
+      }
+    ]
+  },
+  {
+    "name": "校园歌手大赛评分表（基础）",
+    "etype": "excel",
+    "category": "二级·表格",
+    "level": "基础",
+    "materials": [
+      "歌手评分_基础_素材.xlsx"
+    ],
+    "save_as": "座位号_姓名.xlsx",
+    "requirement": "【WPS 表格】校园歌手大赛评分表（基础）\n\n1. 下载素材并用 WPS 表格打开\n2. 工作表名改为「评分表」\n3. F2、G2、H2 分别输入「总分」「平均分」「排名」\n4. 用 SUM 求每人总分（F3:F8）\n5. 用 AVERAGE 求每人平均分（G3:G8），保留 1 位小数\n6. 用 RANK 求每人排名（H3:H8，按总分在 F3:F8 里的名次）\n7. 表头 A2:H2：黑体、14 号、加粗、水平居中\n8. A1:H1 合并后居中\n9. A2:H8 加外边框\n10. 保存为 座位号_姓名.xlsx 并提交",
+    "checks": [
+      {
+        "id": "工作表改名",
+        "type": "sheet_name",
+        "expect": {
+          "name": "评分表"
+        },
+        "score": 10
+      },
+      {
+        "id": "总分公式",
+        "type": "formula",
+        "cell": "F3",
+        "expect": {
+          "function": "SUM"
+        },
+        "score": 15
+      },
+      {
+        "id": "平均分公式",
+        "type": "formula",
+        "cell": "G3",
+        "expect": {
+          "function": "AVERAGE"
+        },
+        "score": 15
+      },
+      {
+        "id": "排名公式",
+        "type": "formula",
+        "cell": "H3",
+        "expect": {
+          "function": "RANK"
+        },
+        "score": 15
+      },
+      {
+        "id": "表头字体",
+        "type": "font",
+        "range": "A2:H2",
+        "expect": {
+          "name": "黑体",
+          "size": 14,
+          "bold": true
+        },
+        "score": 15
+      },
+      {
+        "id": "标题合并",
+        "type": "merged",
+        "range": "A1:H1",
+        "score": 10
+      },
+      {
+        "id": "表头居中",
+        "type": "alignment",
+        "range": "A2:H2",
+        "expect": {
+          "horizontal": "居中"
+        },
+        "score": 10
+      },
+      {
+        "id": "表格边框",
+        "type": "border",
+        "range": "A2:H8",
+        "score": 10
+      }
+    ]
+  },
+  {
+    "name": "家长会邀请函（基础）",
+    "etype": "word",
+    "category": "二级·文字",
+    "level": "基础",
+    "materials": [
+      "邀请函_基础_素材.docx"
+    ],
+    "save_as": "座位号_姓名.docx",
+    "requirement": "【WPS 文字】家长会邀请函（基础）\n\n1. 下载素材并打开\n2. 标题「家长会邀请函」：黑体、二号、加粗、居中\n3. 正文（尊敬的家长 到 请提前与班主任联系 这 4 段）：宋体、小四（12 磅）\n4. 正文首行缩进 2 字符（24 磅），行距 1.5 倍\n5. 页面：A4（21×29.7 厘米），左右页边距 3.17 厘米，上下 2.54 厘米\n6. 页脚插入「雅安中学 高二年级组」\n7. 在文末插入一个 4 行 3 列的表格，表头依次为：时间、内容、地点\n8. 保存为 座位号_姓名.docx 并提交\n\n⚠️ 只改格式，不要删改文字",
+    "checks": [
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "家长会邀请函",
+        "expect": {
+          "name": "黑体",
+          "size": "二号",
+          "bold": true
+        },
+        "score": 20
+      },
+      {
+        "id": "标题居中",
+        "type": "paragraph",
+        "contains": "家长会邀请函",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 10
+      },
+      {
+        "id": "正文字体",
+        "type": "font",
+        "contains": "为了加强家校沟通",
+        "expect": {
+          "name": "宋体",
+          "size": 12
+        },
+        "score": 15
+      },
+      {
+        "id": "正文缩进行距",
+        "type": "paragraph",
+        "contains": "为了加强家校沟通",
+        "expect": {
+          "first_line_indent": 24,
+          "line_spacing": 1.5
+        },
+        "score": 15
+      },
+      {
+        "id": "页面设置",
+        "type": "page_setup",
+        "expect": {
+          "width": 21.0,
+          "height": 29.7,
+          "margin_left": 3.17,
+          "margin_right": 3.17
+        },
+        "score": 15
+      },
+      {
+        "id": "页脚",
+        "type": "header_footer",
+        "where": "footer",
+        "contains": "高二年级组",
+        "score": 10
+      },
+      {
+        "id": "日程表4行3列",
+        "type": "table",
+        "expect": {
+          "count": 1,
+          "rows": 4,
+          "cols": 3
+        },
+        "score": 15
+      }
+    ]
+  },
+  {
+    "name": "春季研学安排（基础）",
+    "etype": "word",
+    "category": "二级·文字",
+    "level": "基础",
+    "materials": [
+      "研学安排_基础_素材.docx"
+    ],
+    "save_as": "座位号_姓名.docx",
+    "requirement": "【WPS 文字】春季研学安排（基础）\n\n1. 下载素材并打开\n2. 标题「春季研学活动安排」：黑体、二号、加粗、居中\n3. 把表格第一行补全为：时间、内容、负责人\n4. 表格内容按素材里的时间补齐（内容、负责人一列自己填写合理内容）\n5. 页眉插入「雅安中学 教务处」\n6. 页面设为 A4（21×29.7 厘米）\n7. 保存为 座位号_姓名.docx 并提交",
+    "checks": [
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "春季研学活动安排",
+        "expect": {
+          "name": "黑体",
+          "size": "二号",
+          "bold": true
+        },
+        "score": 20
+      },
+      {
+        "id": "标题居中",
+        "type": "paragraph",
+        "contains": "春季研学活动安排",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 10
+      },
+      {
+        "id": "表格5行3列",
+        "type": "table",
+        "expect": {
+          "count": 1,
+          "rows": 5,
+          "cols": 3
+        },
+        "score": 20
+      },
+      {
+        "id": "表头第三节",
+        "type": "table",
+        "expect": {
+          "cell": [
+            0,
+            2,
+            "负责人"
+          ]
+        },
+        "score": 15
+      },
+      {
+        "id": "内容列已填",
+        "type": "table",
+        "expect": {
+          "cell": [
+            1,
+            1,
+            "校门口集合乘车"
+          ]
+        },
+        "score": 15
+      },
+      {
+        "id": "页眉",
+        "type": "header_footer",
+        "where": "header",
+        "contains": "教务处",
+        "score": 20
+      }
+    ]
+  },
+  {
+    "name": "校园运动会宣传（基础）",
+    "etype": "ppt",
+    "category": "二级·演示",
+    "level": "基础",
+    "materials": [
+      "运动会_基础_素材.pptx"
+    ],
+    "save_as": "座位号_姓名.pptx",
+    "requirement": "【WPS 演示】校园运动会宣传（基础）\n\n1. 下载素材并打开\n2. 第 1 页标题改为「第18届校园运动会」\n3. 第 1 页标题：微软雅黑、40 磅、加粗、居中\n4. 第 1 页背景设为纯色：深蓝（RGB 1F4E79）\n5. 新增两页，标题分别为「奖项设置」「温馨提示」\n6. 再新增一页，标题「项目时间表」，插入 3 行 3 列的表格\n7. 共 6 页\n8. 保存为 座位号_姓名.pptx 并提交",
+    "checks": [
+      {
+        "id": "共6页",
+        "type": "slide_count",
+        "expect": {
+          "count": 6
+        },
+        "score": 20
+      },
+      {
+        "id": "首页标题",
+        "type": "title",
+        "index": 0,
+        "expect": {
+          "text": "第18届校园运动会"
+        },
+        "score": 15
+      },
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "第18届校园运动会",
+        "expect": {
+          "name": "微软雅黑",
+          "size": 40,
+          "bold": true
+        },
+        "score": 20
+      },
+      {
+        "id": "标题居中",
+        "type": "align",
+        "contains": "第18届校园运动会",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 10
+      },
+      {
+        "id": "背景色",
+        "type": "background",
+        "index": 0,
+        "expect": {
+          "color": "1F4E79"
+        },
+        "score": 20
+      },
+      {
+        "id": "表格3行3列",
+        "type": "table",
+        "expect": {
+          "count": 1,
+          "rows": 3,
+          "cols": 3
+        },
+        "score": 15
+      }
+    ]
+  },
+  {
+    "name": "班级通讯录（入门）",
+    "etype": "excel",
+    "category": "一级·表格",
+    "level": "入门",
+    "materials": [
+      "通讯录_入门_素材.xlsx"
+    ],
+    "save_as": "座位号_姓名.xlsx",
+    "requirement": "【WPS 表格】班级通讯录（入门）\n\n1. 下载素材并用 WPS 表格打开\n2. 把工作表名 Sheet1 改为「通讯录」\n3. 把 A1 的标题「班级通讯录」设为：黑体、14 号、加粗\n4. 把 A1:C1 合并，并水平居中\n5. 表头 A2:C2（姓名、电话、爱好）：黑体、12 号、加粗、水平居中\n6. 给 A1:C7 加上表格边框\n7. 保存为 座位号_姓名.xlsx 并提交",
+    "checks": [
+      {
+        "id": "工作表改名",
+        "type": "sheet_name",
+        "expect": {
+          "name": "通讯录"
+        },
+        "score": 20
+      },
+      {
+        "id": "标题合并",
+        "type": "merged",
+        "range": "A1:C1",
+        "score": 20
+      },
+      {
+        "id": "标题字体",
+        "type": "font",
+        "range": "A1",
+        "expect": {
+          "name": "黑体",
+          "size": 14,
+          "bold": true
+        },
+        "score": 20
+      },
+      {
+        "id": "表头加粗居中",
+        "type": "alignment",
+        "range": "A2:C2",
+        "expect": {
+          "horizontal": "居中"
+        },
+        "score": 20
+      },
+      {
+        "id": "表格边框",
+        "type": "border",
+        "range": "A1:C7",
+        "score": 20
+      }
+    ]
+  },
+  {
+    "name": "课程表填写（入门）",
+    "etype": "excel",
+    "category": "一级·表格",
+    "level": "入门",
+    "materials": [
+      "课程表_入门_素材.xlsx"
+    ],
+    "save_as": "座位号_姓名.xlsx",
+    "requirement": "【WPS 表格】课程表填写（入门）\n\n1. 下载素材并用 WPS 表格打开\n2. 把工作表名 Sheet1 改为「课程表」\n3. 把 A1:F1 合并，标题「课程表」：黑体、14 号、加粗、水平居中\n4. 第 2 行填上表头：节次、星期一、星期二、星期三、星期四、星期五\n5. 第 2 行表头：黑体、12 号、加粗、水平居中\n6. 在 B3 单元格写上「语文」（第一节课）\n7. 给 A1:F7 加上表格边框\n8. 保存为 座位号_姓名.xlsx 并提交",
+    "checks": [
+      {
+        "id": "工作表改名",
+        "type": "sheet_name",
+        "expect": {
+          "name": "课程表"
+        },
+        "score": 15
+      },
+      {
+        "id": "标题合并",
+        "type": "merged",
+        "range": "A1:F1",
+        "score": 20
+      },
+      {
+        "id": "表头星期三",
+        "type": "cell_value",
+        "cell": "D2",
+        "expect": {
+          "value": "星期三"
+        },
+        "score": 15
+      },
+      {
+        "id": "第一节课语文",
+        "type": "cell_value",
+        "cell": "B3",
+        "expect": {
+          "value": "语文"
+        },
+        "score": 20
+      },
+      {
+        "id": "表头加粗",
+        "type": "font",
+        "range": "A2:F2",
+        "expect": {
+          "name": "黑体",
+          "size": 12,
+          "bold": true
+        },
+        "score": 15
+      },
+      {
+        "id": "表格边框",
+        "type": "border",
+        "range": "A1:F7",
+        "score": 15
+      }
+    ]
+  },
+  {
+    "name": "自我介绍排版（入门）",
+    "etype": "word",
+    "category": "一级·文字",
+    "level": "入门",
+    "materials": [
+      "自我介绍_入门_素材.docx"
+    ],
+    "save_as": "座位号_姓名.docx",
+    "requirement": "【WPS 文字】自我介绍排版（入门）\n\n1. 下载素材并用 WPS 文字打开\n2. 标题「我的自我介绍」：黑体、二号、加粗、居中\n3. 正文三段：宋体、小四（12 磅）\n4. 页面设为 A4（宽 21 厘米、高 29.7 厘米）\n5. 保存为 座位号_姓名.docx 并提交",
+    "checks": [
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "我的自我介绍",
+        "expect": {
+          "name": "黑体",
+          "size": "二号",
+          "bold": true
+        },
+        "score": 30
+      },
+      {
+        "id": "标题居中",
+        "type": "paragraph",
+        "contains": "我的自我介绍",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 20
+      },
+      {
+        "id": "正文字体",
+        "type": "font",
+        "contains": "我最喜欢的科目",
+        "expect": {
+          "name": "宋体",
+          "size": 12
+        },
+        "score": 30
+      },
+      {
+        "id": "页面A4",
+        "type": "page_setup",
+        "expect": {
+          "width": 21.0,
+          "height": 29.7
+        },
+        "score": 20
+      }
+    ]
+  },
+  {
+    "name": "古诗抄写排版（入门）",
+    "etype": "word",
+    "category": "一级·文字",
+    "level": "入门",
+    "materials": [
+      "古诗_入门_素材.docx"
+    ],
+    "save_as": "座位号_姓名.docx",
+    "requirement": "【WPS 文字】古诗抄写排版（入门）\n\n1. 下载素材并用 WPS 文字打开\n2. 标题「春晓」：黑体、三号、加粗、居中\n3. 两句诗句：居中、宋体、小四（12 磅）\n4. 页脚写上班名（例如「五年级（1）班」）\n5. 保存为 座位号_姓名.docx 并提交",
+    "checks": [
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "春晓",
+        "expect": {
+          "name": "黑体",
+          "size": "三号",
+          "bold": true
+        },
+        "score": 30
+      },
+      {
+        "id": "诗句居中",
+        "type": "paragraph",
+        "contains": "春眠不觉晓",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 20
+      },
+      {
+        "id": "诗句字体",
+        "type": "font",
+        "contains": "春眠不觉晓",
+        "expect": {
+          "name": "宋体",
+          "size": 12
+        },
+        "score": 25
+      },
+      {
+        "id": "页脚班名",
+        "type": "header_footer",
+        "where": "footer",
+        "contains": "班",
+        "score": 25
+      }
+    ]
+  },
+  {
+    "name": "我的班级介绍（入门）",
+    "etype": "ppt",
+    "category": "一级·演示",
+    "level": "入门",
+    "materials": [
+      "我的班级_入门_素材.pptx"
+    ],
+    "save_as": "座位号_姓名.pptx",
+    "requirement": "【WPS 演示】我的班级介绍（入门）\n\n1. 下载素材并用 WPS 演示打开\n2. 第 1 页标题改为「五年级（1）班」\n3. 第 1 页标题：微软雅黑、36 磅、加粗、居中\n4. 再新增 3 页，标题分别为「班级口号」「班级荣誉」「我的目标」\n5. 一共 4 页\n6. 保存为 座位号_姓名.pptx 并提交",
+    "checks": [
+      {
+        "id": "共4页",
+        "type": "slide_count",
+        "expect": {
+          "count": 4
+        },
+        "score": 25
+      },
+      {
+        "id": "首页标题",
+        "type": "title",
+        "index": 0,
+        "expect": {
+          "text": "五年级（1）班"
+        },
+        "score": 25
+      },
+      {
+        "id": "标题字体",
+        "type": "font",
+        "contains": "五年级（1）班",
+        "expect": {
+          "name": "微软雅黑",
+          "size": 36,
+          "bold": true
+        },
+        "score": 25
+      },
+      {
+        "id": "标题居中",
+        "type": "align",
+        "contains": "五年级（1）班",
+        "expect": {
+          "align": "居中"
+        },
+        "score": 25
+      }
+    ]
+  }
+]

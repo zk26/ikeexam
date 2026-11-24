@@ -1,0 +1,522 @@
+[
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "存储容量 1 KB 等于多少字节？",
+    "options": ["A. 100", "B. 1000", "C. 1024", "D. 512"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列文件扩展名中，表示图片文件的是？",
+    "options": ["A. .txt", "B. .jpg", "C. .docx", "D. .mp3"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "被称为计算机「大脑」的核心部件是？",
+    "options": ["A. 内存", "B. 硬盘", "C. CPU", "D. 显卡"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于输出设备的是？",
+    "options": ["A. 鼠标", "B. 扫描仪", "C. 显示器", "D. 键盘"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "在 Python 中，表示「不等于」的运算符是？",
+    "options": ["A. =", "B. ==", "C. !=", "D. <>"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列保护数据安全的做法，最合适的是？",
+    "options": ["A. 随意点击陌生链接", "B. 使用简单密码", "C. 定期备份重要数据", "D. 关闭杀毒软件"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "关系型数据库中，表的「一行」称为？",
+    "options": ["A. 字段", "B. 记录", "C. 主键", "D. 视图"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "下列属于合法 Python 变量名的是？",
+    "options": ["A. 2abc", "B. my_name", "C. my-name", "D. if"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "流程图中，菱形框表示？",
+    "options": ["A. 开始/结束", "B. 处理操作", "C. 判断", "D. 输入输出"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "下列属于传输层协议的是？",
+    "options": ["A. HTTP", "B. FTP", "C. TCP", "D. IP"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列图像格式中，支持透明背景的是？",
+    "options": ["A. BMP", "B. JPG", "C. PNG", "D. MP3"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列不属于算法的基本特征的是？",
+    "options": ["A. 有穷性", "B. 确定性", "C. 无限循环", "D. 可行性"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "在 Excel 公式中，表示绝对引用的符号是？",
+    "options": ["A. @", "B. #", "C. $", "D. %"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "计算机内存中，断电后信息仍不丢失的是？",
+    "options": ["A. RAM", "B. ROM", "C. 高速缓存", "D. 虚拟内存"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于搜索引擎的是？",
+    "options": ["A. Word", "B. 百度", "C. QQ", "D. 迅雷"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "下列属于应用软件的是？",
+    "options": ["A. Windows", "B. Linux", "C. 微信", "D. 数据库管理系统"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于即时通信工具的是？",
+    "options": ["A. Excel", "B. 微信", "C. 迅雷", "D. 记事本"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "在 Python 中，用于从用户获取输入的函数是？",
+    "options": ["A. print()", "B. input()", "C. len()", "D. range()"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在 Python 中，列表（list）是可变的。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "使用复杂密码有助于提高账户安全性。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "计算机内部处理的数据最终都是二进制形式。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "防火墙能完全防止所有网络攻击。",
+    "options": ["正确", "错误"],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "流程图可以用来描述算法。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "存储容量单位换算：1 GB = ____ MB。",
+    "options": [],
+    "answer": "1024",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在 Python 中，用于循环遍历序列的关键字是 ____。",
+    "options": [],
+    "answer": "for",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在 Python 中，定义函数使用的关键字是 ____。",
+    "options": [],
+    "answer": "def",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "超文本传输协议的英文缩写是 ____。",
+    "options": [],
+    "answer": "HTTP",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在 Python 中，获取列表长度的函数是 ____。",
+    "options": [],
+    "answer": "len",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "设计的核心是？",
+    "options": ["A. 创新", "B. 模仿", "C. 省钱", "D. 好看"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于框架结构的是？",
+    "options": ["A. 房屋的梁柱结构", "B. 鸡蛋壳", "C. 水杯", "D. 气球"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "结构的稳定性与支撑面大小的关系是？",
+    "options": ["A. 支撑面越大越稳定", "B. 支撑面越小越稳定", "C. 与支撑面无关", "D. 成反比"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "俗称「钢铁」的铁碳合金是？",
+    "options": ["A. 铝合金", "B. 钢", "C. 铜", "D. 锌"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "加工金属工件时，用于钻圆孔的工艺是？",
+    "options": ["A. 车削", "B. 钻孔", "C. 刨削", "D. 磨削"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "控制系统中，将给定量与被控量进行比较的环节是？",
+    "options": ["A. 比较环节", "B. 执行环节", "C. 被控对象", "D. 控制器"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于自然系统的是？",
+    "options": ["A. 生态系统", "B. 汽车", "C. 计算机", "D. 桥梁"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "设计中遵循「人机关系」原则，主要考虑的是？",
+    "options": ["A. 人与产品之间的关系", "B. 产品价格", "C. 产品重量", "D. 产品颜色"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "流程设计中最基本的组成是？",
+    "options": ["A. 环节和时序", "B. 材料和工具", "C. 图纸和文字", "D. 时间和金钱"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "下列属于复合材料的是？",
+    "options": ["A. 玻璃钢", "B. 纯铜", "C. 塑料", "D. 木材"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "设计的「实用原则」强调的是？",
+    "options": ["A. 产品功能满足使用需求", "B. 外观美观", "C. 价格低廉", "D. 包装精美"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "技术试验的主要目的是？",
+    "options": ["A. 验证设计方案的可行性", "B. 装饰产品", "C. 娱乐", "D. 记录数据"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于壳体结构的是？",
+    "options": ["A. 鸡蛋壳", "B. 桌腿", "C. 房梁", "D. 柱子"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "控制系统中，属于「控制器」的元件是？",
+    "options": ["A. 温控器", "B. 加热丝", "C. 温度传感器", "D. 水壶"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "流程优化中的「并行」指的是？",
+    "options": ["A. 多个环节同时进行", "B. 环节严格顺序执行", "C. 减少环节数量", "D. 增加环节数量"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "设计的「经济性原则」强调？",
+    "options": ["A. 以较低成本实现功能", "B. 越贵越好", "C. 越便宜越好", "D. 与成本无关"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "设计的目的是满足人的需求。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "结构的强度与所用材料无关。",
+    "options": ["正确", "错误"],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "闭环控制系统通常比开环控制系统控制精度更高。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "技术试验是设计过程中的重要环节。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "系统的各个组成部分之间是相互联系、相互作用的。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "三视图中，从物体正上方看到的投影图是 ____ 视图。",
+    "options": [],
+    "answer": "俯",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "开环控制与闭环控制的主要区别在于是否有 ____ 环节。",
+    "options": [],
+    "answer": "反馈",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "结构按几何形状可分为实体结构、框架结构和 ____ 结构。",
+    "options": [],
+    "answer": "壳体",
+    "score": 2
+  }
+]

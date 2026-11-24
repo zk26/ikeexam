@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}{{ student.name or host }} 答题明细{% endblock %}
+{% block body %}
+
+<div class="card">
+<h1>{{ student.name or host }}{% if student.seat %}（{{ student.seat }}号）{% endif %} — 答题明细
+  <span class="tag gray">机器标识 {{ host }}</span>
+  {% if exam.code %}<span class="tag code">{{ exam.code }}</span>{% endif %}
+</h1>
+<p class="muted">{{ exam.title }}</p>
+<div class="bar"><a class="btn gray" href="/scores/{{ exam.id }}">{{ icon('arrow-left') }} 返回成绩表</a></div>
+</div>
+
+<!-- ================= 统计：先给结论 ================= -->
+<div class="card">
+<h2>成绩统计</h2>
+<div class="grid">
+  <div class="stat"><div class="n" style="color:var(--brand)">{{ stats.total_got }}</div>
+    <div class="t">总分（满分 {{ stats.total_full }}）</div></div>
+  <div class="stat"><div class="n" style="color:var(--brand)">{{ stats.total_rate }}%</div>
+    <div class="t">总得分率</div></div>
+  <div class="stat"><div class="n" style="color:var(--green)">{{ stats.theory_got }} / {{ stats.theory_full }}</div>
+    <div class="t">理论题得分</div></div>
+  <div class="stat"><div class="n">{{ stats.theory_rate }}%</div>
+    <div class="t">理论题得分率</div></div>
+  <div class="stat"><div class="n">{{ stats.answered }} / {{ stats.total }}</div>
+    <div class="t">理论题已答</div></div>
+  <div class="stat"><div class="n">{{ stats.correct }} 题</div>
+    <div class="t">答对（正确率 {{ stats.correct_rate }}%）</div></div>
+  <div class="stat">
+    <div class="n" style="color:var(--orange)">
+      {% if stats.practice_score is not none %}{{ stats.practice_score }} / {{ stats.practice_full }}
+      {% else %}<span style="font-size:.875rem" class="muted">未交</span>{% endif %}
+    </div><div class="t">实操题得分{% if stats.practice_score is not none %}（{{ stats.practice_rate }}%）{% endif %}</div></div>
+  <div class="stat"><div class="n">{{ stats.ck_full }} / {{ stats.ck_total }}</div>
+    <div class="t">实操评分点满分</div></div>
+</div>
+
+{% if type_stats %}
+<h3>理论题各题型</h3>
+<table>
+  <tr><th>题型</th><th>已答 / 题数</th><th>答对</th><th>得分</th><th>得分率</th></tr>
+  {% for t in type_stats %}
+  <tr>
+    <td>{{ t.type }}</td>
+    <td>{{ t.answered }} / {{ t.total }}</td>
+    <td>{{ t.correct }}</td>
+    <td>{{ t.got }} / {{ t.full }}</td>
+    <td>
+      <span class="tag {% if t.rate >= 85 %}ok{% elif t.rate >= 60 %}warn{% else %}no{% endif %}">{{ t.rate }}%</span>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+</div>
+
+<!-- ================= 详情：理论题 ================= -->
+<div class="card">
+<h2>理论题逐题（{{ theory_got }} / {{ theory_full }}）</h2>
+<table>
+  <tr><th>#</th><th>题型</th><th>题干</th><th>学生答案</th><th>正确答案</th><th>得分</th></tr>
+  {% for r in theory_rows %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td>{{ r.type_name }}</td>
+    <td>{{ r.stem }}</td>
+    <td class="mono">{% if r.answered %}{{ r.answer }}{% else %}<span class="muted">未答</span>{% endif %}</td>
+    <td class="mono">{{ r.std }}</td>
+    <td>{% if r.correct %}<span class="tag ok">{{ r.got }}</span>
+        {% else %}<span class="tag no">0</span>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">本场没有理论题</td></tr>
+  {% endfor %}
+</table>
+</div>
+
+<!-- ================= 详情：实操题 ================= -->
+<div class="card">
+<h2>实操题评分（{{ stats.files }} 份提交）</h2>
+{% if subs %}
+  {% for s in subs %}
+  <div style="border:1px solid var(--line);border-radius:var(--r-s);padding:14px 16px;margin-bottom:12px">
+    <p style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <b>{{ s._task_name }}</b>
+      <span class="tag gray">{{ s.filename }}</span>
+      {% if s.score is not none %}<span class="tag ok">{{ s.score }} / {{ s.full }}</span>
+      {% else %}<span class="tag warn">未评分</span>{% endif %}
+    </p>
+    <table>
+      <tr><th>评分点</th><th>得分</th><th>满分</th><th>说明</th></tr>
+      {% for d in s._detail %}
+      <tr>
+        <td>{{ d.id }}</td>
+        <td>{% if d.got >= d.full %}<span class="tag ok">{{ d.got }}</span>
+            {% elif d.got > 0 %}<span class="tag warn">{{ d.got }}</span>
+            {% else %}<span class="tag no">{{ d.got }}</span>{% endif %}</td>
+        <td>{{ d.full }}</td>
+        <td class="muted">{{ d.msg }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">暂无评分明细，点成绩页的「重新评分」</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endfor %}
+{% else %}
+<p class="muted">该学生未提交实操文件</p>
+{% endif %}
+</div>
+
+{% if drawings %}
+<!-- ================= 详情：画图作品（画板 / 拼豆各一份） ================= -->
+{% for d in drawings %}
+<div class="card">
+  <h2>{{ d.kind_name }}作品</h2>
+  <p style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+    <b>{{ d.filename or d.kind_name }}</b>
+    <span class="tag info">{{ (d.size / 1024) | round(1) }} KB</span>
+    <a class="btn ghost sm" href="/exam/{{ exam.id }}/drawing/{{ host }}/download?kind={{ d.kind or 'draw' }}">下载原图</a>
+  </p>
+  <img src="/exam/{{ exam.id }}/drawing/{{ host }}?kind={{ d.kind or 'draw' }}"
+       alt="{{ student.name or host }} 的{{ d.kind_name }}作品"
+       style="max-width:100%;border:1px solid var(--line);border-radius:var(--r-s)">
+</div>
+{% endfor %}
+{% elif has_drawing %}
+<div class="card">
+  <h2>画图作品</h2>
+  <p class="muted">该学生还没有提交画图作品</p>
+</div>
+{% endif %}
+
+{% endblock %}

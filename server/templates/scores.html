@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}成绩{% endblock %}
+{% block body %}
+
+<div class="card">
+<h1 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  {{ exam.title }} — 成绩
+  {% if exam.code %}<span class="tag code">{{ exam.code }}</span>{% endif %}
+  <span class="tag gray">班级：{{ exam.klass or '未分班' }}</span>
+</h1>
+<div class="bar">
+  <a class="btn green" href="/scores/{{ exam.id }}/xlsx"
+     title="Excel 四个表：成绩汇总 / 理论题逐题 / 操作题逐题 / 打字统计，全部明细都有">
+    {{ icon('download') }} 导出全部明细 Excel</a>
+  <a class="btn" href="/scores/{{ exam.id }}/csv">{{ icon('download') }} 导出成绩 CSV</a>
+  <a class="btn green" href="/scores/{{ exam.id }}/zip?scope=klass"
+     title="按班级归档目录打包，交教务/存档用">
+    {{ icon('download') }} 打包下载本班答卷</a>
+  <a class="btn" href="/scores/{{ exam.id }}/zip">{{ icon('download') }} 打包所有答卷</a>
+  <a class="btn orange" href="/scores/{{ exam.id }}/regrade"
+     onclick="return confirm('对所有已交卷文件重新评分？')">{{ icon('refresh') }} 重新评分</a>
+  <a class="btn ghost" href="/scores/{{ exam.id }}/rejudge-code"
+     onclick="return confirm('把本场所有程序填空按「运行结果」重新判一遍？')"
+     title="改过期望输出、或判分时服务器缺环境（如 g++）后用这个补判">{{ icon('refresh') }} 重判程序填空</a>
+  <a class="btn red" href="/scores/{{ exam.id }}/plagiarism">{{ icon('search') }} 抄袭检测</a>
+  <a class="btn gray" href="/">{{ icon('arrow-left') }} 返回控制台</a>
+</div>
+
+<table>
+  <tr>
+    <th>座位</th><th>姓名</th><th>机器标识</th><th>IP</th>
+    <th>理论题</th><th>实操题</th><th>总分</th><th>交卷</th><th>操作</th>
+  </tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.seat or '-' }}</td>
+    <td><b>{{ r.name or '-' }}</b></td>
+    <td class="mono">{{ r.hostname }}</td>
+    <td class="mono muted">{{ r.ip }}</td>
+    <td>{{ r.theory }} / {{ r.theory_full }}</td>
+    <td>
+      {% if r.practice is not none %}{{ r.practice }} / {{ r.practice_full }}
+      {% else %}<span class="muted">未交</span>{% endif %}
+    </td>
+    <td class="big">{{ r.total }}</td>
+    <td>{% if r.submitted %}<span class="tag ok">已交</span>
+        {% else %}<span class="tag no">未交</span>{% endif %}</td>
+    <td>
+      <a class="btn sm" href="/detail/{{ exam.id }}/{{ r.hostname }}">查看</a>
+      {% if r.sub_id %}
+      <a class="btn sm red" href="/scores/{{ exam.id }}/submission/{{ r.sub_id }}/delete"
+         onclick="return confirm('删除该提交记录？')">删除</a>
+      {% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="9" class="muted">还没有学生记录</td></tr>
+  {% endfor %}
+</table>
+</div>
+
+<!-- ================= 数据可视化 ================= -->
+<div class="card">
+  <h2>成绩分析</h2>
+  <div class="grid">
+    <div class="stat"><div class="n">{{ summary.count }}</div><div class="t">学生数</div></div>
+    <div class="stat"><div class="n" style="color:var(--green)">{{ summary.submitted }}</div>
+      <div class="t">已交卷</div></div>
+    <div class="stat"><div class="n">{{ summary.avg }}</div>
+      <div class="t">平均分（总分 {{ summary.full_total }}）</div></div>
+    <div class="stat"><div class="n">{{ summary.avg_pct }}%</div><div class="t">平均得分率</div></div>
+    <div class="stat"><div class="n" style="color:var(--brand)">{{ summary.pass_rate }}%</div>
+      <div class="t">及格率（{{ summary.pass_n }} 人 ≥60%）</div></div>
+    <div class="stat"><div class="n" style="color:var(--orange)">{{ summary.good_rate }}%</div>
+      <div class="t">优秀率（{{ summary.good_n }} 人 ≥85%）</div></div>
+    <div class="stat"><div class="n">{{ summary.max }}</div><div class="t">最高分</div></div>
+    <div class="stat"><div class="n">{{ summary.min }}</div><div class="t">最低分</div></div>
+  </div>
+
+  <div class="charts" style="margin-top:20px">
+    <div class="chart">
+      <h3>分数段分布 <span class="hint">按百分制折算</span></h3>
+      <div class="cv" id="c-dist" data-label="分数段分布柱状图：各分数段的人数"></div>
+    </div>
+    <div class="chart">
+      <h3>及格率 / 优秀率 <span class="hint">全体学生</span></h3>
+      <div class="cv" id="c-rate" data-label="及格率与优秀率仪表盘"></div>
+    </div>
+    <div class="chart tall">
+      <h3>各题得分率 <span class="hint">越低说明这道题全班错得越多</span></h3>
+      <div class="cv" id="c-q" data-label="各题得分率条形图"></div>
+    </div>
+    {% if crates %}
+    <div class="chart tall">
+      <h3>实操评分点得分率 <span class="hint">学生普遍漏做哪一步</span></h3>
+      <div class="cv" id="c-check" data-label="实操各评分点得分率条形图"></div>
+    </div>
+    {% endif %}
+    <div class="chart tall">
+      <h3>成绩排名 <span class="hint">前 20 名</span></h3>
+      <div class="cv" id="c-rank" data-label="成绩排名条形图：前 20 名总分"></div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block script %}
+<script>
+/* ---------- 数据（后端算好，直接注入）---------- */
+var DIST   = {{ dist|tojson }};
+var QRATES = {{ qrates|tojson }};
+var CRATES = {{ crates|tojson }};
+var ROWS   = {{ rows|tojson }};
+var SUMMARY = {{ summary|tojson }};
+var QTYPE  = {{ qtype_cn|tojson }};
+
+/* 得分率高→绿，中→黄，低→红。
+   色值取设计令牌同款：每个色块在白底上都 ≥3:1（非文字元素最低要求），
+   原来用的 #f59e0b 只有 2.2:1，浅色条几乎看不见。 */
+function rateColor(r) {
+  if (r >= 85) return '#15803d';
+  if (r >= 70) return '#2563eb';
+  if (r >= 60) return '#d97706';
+  return '#dc2626';
+}
+
+/* 1. 分数段分布 */
+(function () {
+  // 五段色阶：每段对白底都 ≥3:1。
+  // 原来中间的 #facc15 只有 1.53:1、#f59e0b 2.15:1 —— 浅黄柱子在白底上几乎看不见
+  var segColor = ['#dc2626', '#d97706', '#2563eb', '#0891b2', '#15803d'];
+  var values = DIST.values || [];
+  var total = values.reduce(function (a, b) { return a + b; }, 0);
+  ExamChart.bar('c-dist', {
+    labels: DIST.labels, values: values
+  }, {
+    name: '人数', rotate: 12, showLabel: true, colors: segColor,
+    emptyMsg: '还没有成绩数据',
+    formatter: function (ps) {
+      var p = ps[0];
+      var pct = total ? (p.value / total * 100).toFixed(1) : 0;
+      return p.name + '<br/>' + p.value + ' 人（' + pct + '%）';
+    }
+  });
+})();
+
+/* 2. 及格率 / 优秀率 仪表盘 */
+(function () {
+  var el = document.getElementById('c-rate');
+  if (!el) return;
+  if (!SUMMARY.count) { ExamChart.empty('c-rate', '还没有成绩数据'); return; }
+  var ins = echarts.init(el);
+  ins.setOption({
+    series: [
+      { type: 'gauge', startAngle: 210, endAngle: -30, min: 0, max: 100,
+        radius: '88%', center: ['28%', '58%'],
+        progress: { show: true, width: 14, itemStyle: { color: '#3b82f6' } },
+        axisLine: { lineStyle: { width: 14, color: [[1, '#e2e8f0']] } },
+        axisTick: { show: false }, splitLine: { show: false },
+        axisLabel: { show: false }, pointer: { show: false },
+        title: { offsetCenter: [0, '38%'], fontSize: 12, color: '#475569' },
+        detail: { valueAnimation: true, fontSize: 22, fontWeight: 'bold',
+                  offsetCenter: [0, '0%'], formatter: '{value}%',
+                  color: '#3b82f6' },
+        data: [{ value: SUMMARY.pass_rate, name: '及格率' }] },
+      { type: 'gauge', startAngle: 210, endAngle: -30, min: 0, max: 100,
+        radius: '88%', center: ['74%', '58%'],
+        progress: { show: true, width: 14, itemStyle: { color: '#f59e0b' } },
+        axisLine: { lineStyle: { width: 14, color: [[1, '#e2e8f0']] } },
+        axisTick: { show: false }, splitLine: { show: false },
+        axisLabel: { show: false }, pointer: { show: false },
+        title: { offsetCenter: [0, '38%'], fontSize: 12, color: '#475569' },
+        detail: { valueAnimation: true, fontSize: 22, fontWeight: 'bold',
+                  offsetCenter: [0, '0%'], formatter: '{value}%',
+                  color: '#f59e0b' },
+        data: [{ value: SUMMARY.good_rate, name: '优秀率' }] }
+    ]
+  });
+})();
+
+/* 3. 各题得分率 */
+(function () {
+  var labels = [], values = [], colors = [];
+  (QRATES || []).forEach(function (q) {
+    labels.push('第' + q.no + '题 ' + (QTYPE[q.qtype] || q.qtype));
+    values.push(q.rate);
+    colors.push(rateColor(q.rate));
+  });
+  ExamChart.bar('c-q', { labels: labels, values: values }, {
+    name: '得分率', horizontal: true, showLabel: true, colors: colors,
+    emptyMsg: '还没有理论题数据',
+    formatter: function (ps) {
+      var p = ps[0], q = QRATES[p.dataIndex] || {};
+      return p.name + '<br/>得分率 ' + p.value + '%<br/>'
+           + '作答 ' + (q.answered || 0) + ' 人，满分 ' + (q.score || 0) + ' 分';
+    }
+  });
+})();
+
+/* 4. 实操评分点得分率（低的排最上：最该讲评） */
+(function () {
+  var id = 'c-check';
+  if (!document.getElementById(id)) return;
+  var labels = [], values = [], colors = [];
+  (CRATES || []).slice(0, 14).forEach(function (c) {
+    labels.push(c.name);
+    values.push(c.rate);
+    colors.push(rateColor(c.rate));
+  });
+  ExamChart.bar(id, { labels: labels, values: values }, {
+    name: '得分率', horizontal: true, showLabel: true, colors: colors,
+    emptyMsg: '还没有实操评分数据',
+    formatter: function (ps) {
+      var p = ps[0], c = (CRATES || [])[p.dataIndex] || {};
+      return p.name + '<br/>平均得分率 ' + p.value + '%<br/>'
+           + '该评分点满分 ' + (c.full || 0) + ' 分';
+    }
+  });
+})();
+
+/* 5. 成绩排名（前 20） */
+(function () {
+  var sorted = (ROWS || []).slice().sort(function (a, b) {
+    return (b.total || 0) - (a.total || 0);
+  }).slice(0, 20);
+  var labels = [], values = [];
+  sorted.forEach(function (r) {
+    var who = (r.seat ? r.seat + '号 ' : '') + (r.name || r.hostname);
+    labels.push(who);
+    values.push(r.total || 0);
+  });
+  // 横向条形图从下往上画，倒过来让第一名在最上面
+  ExamChart.bar('c-rank', { labels: labels.reverse(), values: values.reverse() }, {
+    name: '总分', horizontal: true, showLabel: true, colors: ['#3b82f6'],
+    emptyMsg: '还没有成绩数据',
+    formatter: function (ps) {
+      return ps[0].name + '<br/>总分 ' + ps[0].value;
+    }
+  });
+})();
+</script>
+{% endblock %}

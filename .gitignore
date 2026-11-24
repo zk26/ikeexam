@@ -1,0 +1,47 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ---- 打包产物 ----
+build/
+dist/
+*.spec
+*.exe
+*.manifest
+
+# ---- 敏感信息（密码 hash / 密钥，绝不能进仓库）----
+auth.json
+secret.key
+*.key
+.pem
+
+# ---- 运行时数据 ----
+logs/
+*.db
+*.sqlite3
+*.sqlite
+ikee_Exam/
+uploads/
+exams/
+学生端/
+老师端/
+materials/
+qimg/
+teacher/config.json
+
+# ---- 临时文件 ----
+*.part
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# ---- 运行时缓存 / 编辑器与 AI 助手内部文件 ----
+.server_cache
+*.server_cache
+.codebuddy/

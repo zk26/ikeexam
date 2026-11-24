@@ -1,0 +1,1399 @@
+[
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "计算机能直接识别和执行的语言是？",
+    "options": [
+      "A. 机器语言",
+      "B. 汇编语言",
+      "C. 高级语言",
+      "D. 自然语言"
+    ],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "1GB 等于多少 MB？",
+    "options": [
+      "A. 100",
+      "B. 512",
+      "C. 1000",
+      "D. 1024"
+    ],
+    "answer": "D",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "下列属于输出设备的是？",
+    "options": [
+      "A. 键盘",
+      "B. 鼠标",
+      "C. 显示器",
+      "D. 扫描仪"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "ROM 的中文名称是？",
+    "options": [
+      "A. 随机存储器",
+      "B. 只读存储器",
+      "C. 硬盘",
+      "D. 缓存"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "下列不属于操作系统的是？",
+    "options": [
+      "A. Windows",
+      "B. Linux",
+      "C. Python",
+      "D. macOS"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "计算机硬件五大组成部分不包括？",
+    "options": [
+      "A. 运算器",
+      "B. 控制器",
+      "C. 显示器",
+      "D. 存储器"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "CPU 的中文名称是？",
+    "options": [
+      "A. 内存",
+      "B. 中央处理器",
+      "C. 硬盘",
+      "D. 主板"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "下列存储器中，存取速度最快的是？",
+    "options": [
+      "A. 硬盘",
+      "B. U盘",
+      "C. 内存",
+      "D. 光盘"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "计算机软件分为系统软件和？",
+    "options": [
+      "A. 硬件",
+      "B. 应用软件",
+      "C. 网络",
+      "D. 数据"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "计算机基础",
+    "stem": "冯·诺依曼体系结构的核心思想是？",
+    "options": [
+      "A. 存储程序",
+      "B. 分时处理",
+      "C. 并行计算",
+      "D. 网络通信"
+    ],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "计算机基础",
+    "stem": "CPU 是计算机的中央处理器。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "计算机基础",
+    "stem": "RAM 中的数据断电后不会丢失。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "计算机基础",
+    "stem": "一个字节（Byte）由 8 个二进制位（bit）组成。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "计算机基础",
+    "stem": "显示器属于输入设备。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "计算机基础",
+    "stem": "操作系统是系统软件的一种。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "计算机基础",
+    "stem": "计算机硬件五大组成部分是：运算器、控制器、存储器、输入设备和____。",
+    "answer": "输出设备",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "计算机基础",
+    "stem": "ASCII 码用____个二进制位表示一个字符。",
+    "answer": "7|8",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "计算机基础",
+    "stem": "URL 的中文名称是统一____定位符。",
+    "answer": "资源",
+    "score": 2
+  },
+  {
+    "qtype": "multi",
+    "category": "计算机基础",
+    "stem": "以下属于计算机输入设备的有？",
+    "options": [
+      "A. 键盘",
+      "B. 鼠标",
+      "C. 打印机",
+      "D. 扫描仪"
+    ],
+    "answer": "ABD",
+    "score": 3
+  },
+  {
+    "qtype": "multi",
+    "category": "计算机基础",
+    "stem": "以下属于计算机网络拓扑结构的有？",
+    "options": [
+      "A. 星型",
+      "B. 环型",
+      "C. 三角型",
+      "D. 总线型"
+    ],
+    "answer": "ABD",
+    "score": 3
+  },
+  {
+    "qtype": "single",
+    "category": "信息与编码",
+    "stem": "二进制数 1010 转换为十进制是？",
+    "options": [
+      "A. 8",
+      "B. 9",
+      "C. 10",
+      "D. 11"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "信息与编码",
+    "stem": "十进制数 10 转换为二进制是？",
+    "options": [
+      "A. 1001",
+      "B. 1010",
+      "C. 1100",
+      "D. 1110"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "信息与编码",
+    "stem": "下列不属于信息基本特征的是？",
+    "options": [
+      "A. 载体依附性",
+      "B. 价值性",
+      "C. 时效性",
+      "D. 不变性"
+    ],
+    "answer": "D",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "信息与编码",
+    "stem": "1KB 等于多少字节？",
+    "options": [
+      "A. 100",
+      "B. 512",
+      "C. 1000",
+      "D. 1024"
+    ],
+    "answer": "D",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "信息与编码",
+    "stem": "在 ASCII 码表中，字符 'A' 的十进制码值是？",
+    "options": [
+      "A. 48",
+      "B. 65",
+      "C. 97",
+      "D. 100"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "信息与编码",
+    "stem": "下列属于图像文件格式的是？",
+    "options": [
+      "A. .docx",
+      "B. .xlsx",
+      "C. .jpg",
+      "D. .mp3"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "信息与编码",
+    "stem": "二进制只有 0 和 1 两个数码。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "信息与编码",
+    "stem": "1MB 等于 1000KB。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "信息与编码",
+    "stem": "十进制数 7 转换为二进制是____。",
+    "answer": "111",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "信息与编码",
+    "stem": "1TB = ____GB。",
+    "answer": "1024",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "网络基础",
+    "stem": "IP 地址 127.0.0.1 代表？",
+    "options": [
+      "A. 广播地址",
+      "B. 本机地址",
+      "C. 网关地址",
+      "D. DNS 地址"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "网络基础",
+    "stem": "HTTP 的中文名称是？",
+    "options": [
+      "A. 文件传输协议",
+      "B. 超文本传输协议",
+      "C. 邮件协议",
+      "D. 网络协议"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "网络基础",
+    "stem": "下列属于合法 IP 地址的是？",
+    "options": [
+      "A. 256.1.1.1",
+      "B. 192.168.1.1",
+      "C. 192.168.1",
+      "D. 192.168.1.256"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "网络基础",
+    "stem": "下列不属于网络拓扑结构的是？",
+    "options": [
+      "A. 星型",
+      "B. 环型",
+      "C. 总线型",
+      "D. 三角型"
+    ],
+    "answer": "D",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "网络基础",
+    "stem": "www.sina.com 是一个？",
+    "options": [
+      "A. IP地址",
+      "B. 域名",
+      "C. 邮箱",
+      "D. MAC地址"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "网络基础",
+    "stem": "防火墙可以完全防止所有网络攻击。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "网络基础",
+    "stem": "HTTP 和 HTTPS 都是网页传输协议。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "网络基础",
+    "stem": "IP 地址由____个字节组成。",
+    "answer": "4",
+    "score": 2
+  },
+  {
+    "qtype": "multi",
+    "category": "网络基础",
+    "stem": "以下属于网络连接设备的有？",
+    "options": [
+      "A. 路由器",
+      "B. 交换机",
+      "C. 鼠标",
+      "D. 集线器"
+    ],
+    "answer": "ABD",
+    "score": 3
+  },
+  {
+    "qtype": "single",
+    "category": "信息安全",
+    "stem": "计算机病毒是一种？",
+    "options": [
+      "A. 硬件故障",
+      "B. 特殊程序",
+      "C. 生物病毒",
+      "D. 芯片缺陷"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "信息安全",
+    "stem": "以下密码最安全的是？",
+    "options": [
+      "A. 123456",
+      "B. abcdef",
+      "C. 生日日期",
+      "D. Xk#9mP2!"
+    ],
+    "answer": "D",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "信息安全",
+    "stem": "以下行为最不安全的是？",
+    "options": [
+      "A. 安装杀毒软件",
+      "B. 随意打开陌生邮件附件",
+      "C. 定期备份数据",
+      "D. 设置开机密码"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "信息安全",
+    "stem": "设置复杂密码可以提高账户安全性。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "信息安全",
+    "stem": "在网络上可以随意发布他人的个人信息。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "multi",
+    "category": "信息安全",
+    "stem": "以下属于计算机病毒传播途径的有？",
+    "options": [
+      "A. U盘",
+      "B. 网络下载",
+      "C. 电子邮件",
+      "D. 键盘输入"
+    ],
+    "answer": "ABC",
+    "score": 3
+  },
+  {
+    "qtype": "single",
+    "category": "算法基础",
+    "stem": "算法的三种基本结构不包括？",
+    "options": [
+      "A. 顺序",
+      "B. 选择",
+      "C. 循环",
+      "D. 递归"
+    ],
+    "answer": "D",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "算法基础",
+    "stem": "流程图中，菱形框表示？",
+    "options": [
+      "A. 开始",
+      "B. 处理",
+      "C. 判断",
+      "D. 输入输出"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "算法基础",
+    "stem": "以下哪个不是算法的特征？",
+    "options": [
+      "A. 有穷性",
+      "B. 确定性",
+      "C. 无限性",
+      "D. 可行性"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "算法基础",
+    "stem": "算法可以没有输入，但必须有输出。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "算法基础",
+    "stem": "流程图中，椭圆形表示处理步骤。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "算法基础",
+    "stem": "算法的三种基本结构是顺序、____和循环。",
+    "answer": "选择|分支|条件",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，以下哪个是合法的变量名？",
+    "options": [
+      "A. 2name",
+      "B. my-var",
+      "C. _count",
+      "D. class"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，type(3.14) 的结果是？",
+    "options": [
+      "A. <class 'int'>",
+      "B. <class 'float'>",
+      "C. <class 'str'>",
+      "D. <class 'bool'>"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，len('Hello') 的结果是？",
+    "options": [
+      "A. 4",
+      "B. 5",
+      "C. 6",
+      "D. 报错"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，以下哪个关键字用于定义函数？",
+    "options": [
+      "A. function",
+      "B. def",
+      "C. func",
+      "D. define"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，print(10 // 3) 的输出是？",
+    "options": [
+      "A. 3.33",
+      "B. 3",
+      "C. 3.0",
+      "D. 4"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，以下哪个不是数据类型？",
+    "options": [
+      "A. list",
+      "B. dict",
+      "C. array",
+      "D. tuple"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，range(5) 生成的数字序列是？",
+    "options": [
+      "A. 1~5",
+      "B. 0~5",
+      "C. 0~4",
+      "D. 1~4"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，以下哪个运算符表示「不等于」？",
+    "options": [
+      "A. <>",
+      "B. !=",
+      "C. ><",
+      "D. #="
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，以下哪个用于从键盘读取输入？",
+    "options": [
+      "A. print()",
+      "B. input()",
+      "C. read()",
+      "D. scan()"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "Python基础",
+    "stem": "Python 中，int('10') + 5 的结果是？",
+    "options": [
+      "A. 105",
+      "B. '105'",
+      "C. 15",
+      "D. 报错"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "multi",
+    "category": "Python基础",
+    "stem": "Python 中，以下哪些是可变数据类型？",
+    "options": [
+      "A. list",
+      "B. tuple",
+      "C. dict",
+      "D. str"
+    ],
+    "answer": "AC",
+    "score": 3
+  },
+  {
+    "qtype": "multi",
+    "category": "Python基础",
+    "stem": "Python 中，以下哪些是合法的注释写法？",
+    "options": [
+      "A. # 单行注释",
+      "B. // 单行注释",
+      "C. '''多行注释'''",
+      "D. /* 多行注释 */"
+    ],
+    "answer": "AC",
+    "score": 3
+  },
+  {
+    "qtype": "judge",
+    "category": "Python基础",
+    "stem": "Python 中，列表（list）是有序的可变序列。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "Python基础",
+    "stem": "Python 中，'Hello' + 5 可以正常运行。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "Python基础",
+    "stem": "Python 中，while 循环至少会执行一次。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "Python基础",
+    "stem": "Python 中，elif 是 else if 的缩写。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\nprint(3 + 2 * 5)",
+    "options": [
+      "A. 25",
+      "B. 13",
+      "C. 11",
+      "D. 报错"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\ns = 'Hello'\nprint(s[1])",
+    "options": [
+      "A. H",
+      "B. e",
+      "C. l",
+      "D. 报错"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\na = [1, 2, 3]\na.append(4)\nprint(len(a))",
+    "options": [
+      "A. 3",
+      "B. 4",
+      "C. 5",
+      "D. 报错"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\nfor i in range(3):\n    print(i, end=' ')",
+    "options": [
+      "A. 1 2 3",
+      "B. 0 1 2 3",
+      "C. 0 1 2",
+      "D. 1 2"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\nx = 10\nif x > 5:\n    print('A')\nelse:\n    print('B')\nprint('C')",
+    "options": [
+      "A. A",
+      "B. B",
+      "C. A C",
+      "D. B C"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\ns = 0\nfor i in range(1, 6):\n    s += i\nprint(s)",
+    "options": [
+      "A. 10",
+      "B. 15",
+      "C. 20",
+      "D. 21"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\ndef f(n):\n    return n * n\nprint(f(4))",
+    "options": [
+      "A. 8",
+      "B. 16",
+      "C. 4",
+      "D. 报错"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\na = '123'\nb = int(a)\nprint(b + 1)",
+    "options": [
+      "A. 124",
+      "B. '124'",
+      "C. '1231'",
+      "D. 报错"
+    ],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\nlst = [3, 1, 4, 1, 5]\nlst.sort()\nprint(lst[0])",
+    "options": [
+      "A. 3",
+      "B. 5",
+      "C. 1",
+      "D. 报错"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "程序输出",
+    "stem": "以下程序的输出结果是？\n\nprint(bool(0), bool(1), bool(''))",
+    "options": [
+      "A. True True True",
+      "B. False True False",
+      "C. False False False",
+      "D. True False True"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "程序输出判断",
+    "stem": "以下程序运行后，x 的值是 15。\n\nx = 0\nfor i in range(1, 6):\n    x += i",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "程序输出判断",
+    "stem": "以下程序运行后，会输出 '偶数'。\n\nx = 3\nif x % 2 == 0:\n    print('偶数')\nelse:\n    print('奇数')",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "程序输出判断",
+    "stem": "以下程序运行后，a 的值是 [1, 2, 3, 4]。\n\na = [1, 2, 3]\na.append(4)",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "程序输出判断",
+    "stem": "以下程序运行后，输出结果是 6。\n\ndef add(a, b):\n    return a + b\nprint(add(2, 3))",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "程序输出判断",
+    "stem": "以下程序会输出 1 到 10 的所有数字。\n\nfor i in range(1, 11):\n    print(i)",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "程序输出判断",
+    "stem": "以下程序运行后，s 的值是 'Hello World'。\n\ns = 'Hello' + ' ' + 'World'",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：计算 1 到 10 的累加和",
+    "code": "s = 0\nfor i in range(1, ____):\n    s += ____\nprint(s)",
+    "answer": "11|n+1 || i",
+    "score": 4,
+    "stdin_data": ""
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：判断一个数是否为偶数",
+    "code": "n = int(input())\nif n % ____ == ____:\n    print('偶数')\nelse:\n    print('奇数')",
+    "answer": "2 || 0",
+    "score": 4,
+    "stdin_data": "8\n"
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：输出列表中的所有元素",
+    "code": "lst = [10, 20, 30, 40, 50]\nfor x in ____:\n    print(____)",
+    "answer": "lst|x || x",
+    "score": 4,
+    "stdin_data": ""
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：计算 1 到 10 中所有偶数的和",
+    "code": "s = 0\nfor i in range(1, 11):\n    if i % 2 == ____:\n        s += ____\nprint(s)",
+    "answer": "0 || i",
+    "score": 4,
+    "stdin_data": ""
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：求两个数中的较大值",
+    "code": "a = int(input())\nb = int(input())\nif a > ____:\n    print(a)\nelse:\n    print(____)",
+    "answer": "b || b",
+    "score": 4,
+    "stdin_data": "3\n7\n"
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：输出 1 到 100 中能被 3 整除的数",
+    "code": "for i in range(1, 101):\n    if i % ____ == ____:\n        print(i)",
+    "answer": "3 || 0",
+    "score": 4,
+    "stdin_data": ""
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：计算 n 的阶乘",
+    "code": "n = int(input())\ns = ____\nfor i in range(1, ____):\n    s = s * i\nprint(s)",
+    "answer": "1 || n+1|n + 1",
+    "score": 4,
+    "stdin_data": "5\n"
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：找出列表中的最大值",
+    "code": "lst = [23, 45, 12, 67, 34]\nmax_val = ____\nfor x in lst:\n    if x > ____:\n        max_val = x\nprint(max_val)",
+    "answer": "lst[0] || max_val",
+    "score": 4,
+    "stdin_data": ""
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：反转字符串",
+    "code": "s = 'Hello'\nresult = ____\nfor ch in s:\n    result = ch + result\nprint(result)",
+    "answer": "''|\"\"|' '",
+    "score": 4,
+    "stdin_data": ""
+  },
+  {
+    "qtype": "code",
+    "category": "程序填空",
+    "language": "python",
+    "stem": "补全程序：判断一个数是否为素数",
+    "code": "n = int(input())\nis_prime = ____\nfor i in range(2, n):\n    if n % i == ____:\n        is_prime = False\n        break\nprint(is_prime)",
+    "answer": "True || 0",
+    "score": 4,
+    "stdin_data": "7\n"
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 文字的默认保存格式是？",
+    "options": [
+      "A. .docx",
+      "B. .xlsx",
+      "C. .pptx",
+      "D. .txt"
+    ],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 表格中，求平均值的函数是？",
+    "options": [
+      "A. SUM",
+      "B. AVERAGE",
+      "C. COUNT",
+      "D. MAX"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 演示中，幻灯片切换效果在哪里设置？",
+    "options": [
+      "A. 开始选项卡",
+      "B. 插入选项卡",
+      "C. 切换选项卡",
+      "D. 动画选项卡"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 表格中，单元格引用 $A$1 属于？",
+    "options": [
+      "A. 相对引用",
+      "B. 绝对引用",
+      "C. 混合引用",
+      "D. 外部引用"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 文字中，快速选中整篇文档的快捷键是？",
+    "options": [
+      "A. Ctrl+A",
+      "B. Ctrl+C",
+      "C. Ctrl+V",
+      "D. Ctrl+Z"
+    ],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 表格中，COUNT 函数的功能是？",
+    "options": [
+      "A. 求和",
+      "B. 求平均",
+      "C. 计数",
+      "D. 求最大值"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 文字中，插入页码在哪个选项卡？",
+    "options": [
+      "A. 开始",
+      "B. 插入",
+      "C. 页面布局",
+      "D. 视图"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 表格中，一个工作簿默认有几张工作表？",
+    "options": [
+      "A. 1",
+      "B. 2",
+      "C. 3",
+      "D. 5"
+    ],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "WPS知识",
+    "stem": "WPS 表格中，一个工作簿可以包含多个工作表。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "WPS知识",
+    "stem": "WPS 文字中，页眉和页脚只能在打印预览中设置。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "WPS知识",
+    "stem": "WPS 演示中，可以为幻灯片中的对象添加动画效果。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "multi",
+    "category": "WPS知识",
+    "stem": "WPS 表格中，以下哪些是常用的函数？",
+    "options": [
+      "A. SUM",
+      "B. PRINT",
+      "C. COUNT",
+      "D. IF"
+    ],
+    "answer": "ACD",
+    "score": 3
+  },
+  {
+    "qtype": "single",
+    "category": "WPS知识",
+    "stem": "WPS 文字中，可以插入的对象包括？",
+    "options": [
+      "A. 图片",
+      "B. 表格",
+      "C. 图表",
+      "D. 以上都可以"
+    ],
+    "answer": "D",
+    "score": 3
+  },
+  {
+    "qtype": "blank",
+    "category": "WPS知识",
+    "stem": "WPS 表格中，求和函数的名称是____。",
+    "answer": "SUM|sum",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "WPS知识",
+    "stem": "WPS 演示的文件扩展名是____。",
+    "answer": ".pptx",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "WPS知识",
+    "stem": "WPS 表格中，COUNT 函数用于____。",
+    "answer": "计数|统计个数|统计数量",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "多媒体基础",
+    "stem": "以下属于音频文件格式的是？",
+    "options": [
+      "A. .jpg",
+      "B. .mp3",
+      "C. .docx",
+      "D. .html"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "多媒体基础",
+    "stem": "以下属于视频文件格式的是？",
+    "options": [
+      "A. .bmp",
+      "B. .wav",
+      "C. .mp4",
+      "D. .txt"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "多媒体基础",
+    "stem": "以下不属于图像处理软件的是？",
+    "options": [
+      "A. Photoshop",
+      "B. 美图秀秀",
+      "C. WPS文字",
+      "D. 画图"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "多媒体基础",
+    "stem": "PNG 格式支持透明背景。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "多媒体基础",
+    "stem": "MP3 是一种无损音频格式。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "数据处理",
+    "stem": "在 WPS 表格中，单元格地址 C5 表示？",
+    "options": [
+      "A. 第C行第5列",
+      "B. 第3行第5列",
+      "C. 第5行第3列",
+      "D. 第3列第5行"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "数据处理",
+    "stem": "在 WPS 表格中，求 A1 到 A10 的最大值应使用？",
+    "options": [
+      "A. =SUM(A1:A10)",
+      "B. =MAX(A1:A10)",
+      "C. =MIN(A1:A10)",
+      "D. =COUNT(A1:A10)"
+    ],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "数据处理",
+    "stem": "在 WPS 表格中，排序功能在哪个选项卡？",
+    "options": [
+      "A. 开始",
+      "B. 插入",
+      "C. 数据",
+      "D. 审阅"
+    ],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "数据处理",
+    "stem": "WPS 表格中，一个单元格只能存储数字。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "数据处理",
+    "stem": "WPS 表格中，SUM(A1:A5) 可以计算 A1 到 A5 的总和。",
+    "options": [
+      "正确",
+      "错误"
+    ],
+    "answer": "正确",
+    "score": 2
+  }
+]

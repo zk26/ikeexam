@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}修改密码 · ikee考务中心{% endblock %}
+{% block body %}
+
+<h1>修改密码</h1>
+
+<div class="card">
+  <form method="post" autocomplete="off">
+    <div class="row">
+      <label style="width:90px">原密码</label>
+      <input type="password" name="old" required autofocus>
+    </div>
+    <div class="row">
+      <label style="width:90px">新密码</label>
+      <input type="password" name="new" required>
+      <span class="muted">至少 4 位</span>
+    </div>
+    <div class="row">
+      <label style="width:90px">确认新密码</label>
+      <input type="password" name="new2" required>
+    </div>
+    <div class="bar">
+      <button class="btn green" type="submit">保存</button>
+      <a class="btn gray" href="/">返回</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>说明</h2>
+  <ul style="margin-left:20px;line-height:1.9;color:#555;font-size:13px">
+    <li>密码以<b>哈希</b>形式存在 <span class="mono">server/auth.json</span>，不是明文</li>
+    <li>只保护老师端后台页面，<b>学生端答题接口不受影响</b></li>
+    <li>连续输错 5 次会锁定 60 秒（按 IP 计）</li>
+    <li>登录状态保持 8 小时</li>
+    {% if updated %}
+      <li>上次修改：{{ updated|todate }}</li>
+    {% endif %}
+  </ul>
+</div>
+
+<div class="card">
+  <h2>命令行改密码</h2>
+  <p class="muted" style="margin-bottom:8px">忘了密码时，在服务器上执行：</p>
+  <pre>cd exam-system/server
+python3 auth.py --set "新密码"</pre>
+  <p class="muted" style="margin-top:8px">查看状态：<code>python3 auth.py --show</code></p>
+</div>
+
+{% endblock %}

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}服务发现{% endblock %}
+{% block body %}
+
+<div class="card">
+<h1>{{ icon('wifi', 18) }} 服务发现状态</h1>
+
+{% if stats.running %}
+<p class="tag ok" style="padding:8px 12px;font-size:14px">{{ icon('check') }} 广播已开启，学生端可自动找到本机</p>
+{% else %}
+<p class="tag warn" style="padding:8px 12px;font-size:14px">{{ icon('alert') }} 广播未开启（可能用了 --no-beacon）</p>
+{% endif %}
+
+<table>
+  <tr><th style="width:130px">项目</th><th>值</th></tr>
+  <tr><td>服务名</td><td><b>{{ name }}</b><span class="muted">（学生端界面会显示）</span></td></tr>
+  <tr><td>HTTP 端口</td><td class="mono">{{ port }}</td></tr>
+  <tr><td>广播端口</td><td class="mono">{{ stats.beacon_port or 39100 }} <span class="muted">UDP</span></td></tr>
+  <tr><td>已发包</td><td class="mono">{{ stats.sent or 0 }}</td></tr>
+  <tr><td>服务器 IP</td>
+      <td>{% for ip in stats.nics or [] %}<span class="mono">{{ ip }}</span> {% else %}-{% endfor %}</td></tr>
+  <tr><td>广播目标</td>
+      <td>{% for t in stats.targets or [] %}<span class="mono">{{ t }}</span> {% else %}-{% endfor %}</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h2>学生端怎么找到这里</h2>
+<pre>1. 先看上次的缓存（server_cache.json）→ 0.1 秒连上
+2. 听本机的 UDP 广播（每 3 秒一次）→ 1~4 秒
+3. 都不行才扫网段（最慢，最后手段）
+
+所以学生端 config.json 里的 server 留空就行，
+它自己会找过来。</pre>
+</div>
+
+<div class="card">
+<h2>如果学生端找不到</h2>
+<table>
+  <tr><th>现象</th><th>排查</th></tr>
+  <tr>
+    <td>一直显示"正在寻找考试主机"</td>
+    <td>
+      1. 确认本页显示"广播已开启"<br>
+      2. 服务器防火墙放行 UDP {{ stats.beacon_port or 39100 }}：<br>
+      <code>ufw allow 39100/udp</code> 或 <code>firewall-cmd --add-port=39100/udp</code><br>
+      3. 学生机和服务器是否在同一网段
+    </td>
+  </tr>
+  <tr>
+    <td>提示"收到广播但连接失败"</td>
+    <td>
+      广播听到了，但 HTTP 端口不通。检查防火墙放行了 TCP {{ port }}：<br>
+      <code>ufw allow {{ port }}/tcp</code>
+    </td>
+  </tr>
+  <tr>
+    <td>跨网段 / 走了三层交换机</td>
+    <td>
+      广播不跨网段。改用组播启动：<br>
+      <code>python3 app.py --multicast</code><br>
+      （需要交换机开 IGMP Snooping）
+    </td>
+  </tr>
+  <tr>
+    <td>就想手动指定</td>
+    <td>
+      学生端 <code>config.json</code> 里填 <code>"server": "http://192.168.1.5:{{ port }}"</code>，
+      或用 <code>考试客户端.exe --server http://...</code>
+    </td>
+  </tr>
+</table>
+</div>
+
+{% endblock %}

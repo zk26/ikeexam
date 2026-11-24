@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}抄袭检测{% endblock %}
+{% block body %}
+
+<div class="card">
+<h1>{{ exam.title }} — 抄袭检测</h1>
+<div class="bar">
+  <a class="btn green" href="/scores/{{ exam.id }}/plagiarism/csv">{{ icon('download') }} 导出完整报告</a>
+  <a class="btn gray" href="/scores/{{ exam.id }}">{{ icon('arrow-left') }} 返回成绩</a>
+</div>
+
+<p class="muted">
+  共 {{ n }} 份答卷，比对 {{ info.n }} 对。
+  全班平均相似度 <b>{{ '%.3f'|format(info.mean) }}</b>，标准差 {{ '%.3f'|format(info.std) }}。
+</p>
+
+<div class="grid">
+  <div class="stat"><div class="n" style="color:var(--red)">{{ cnt.hard }}</div>
+    <div class="t"><span class="sev red"></span>内容完全相同（严重）</div></div>
+  <div class="stat"><div class="n" style="color:var(--red)">{{ cnt.high }}</div>
+    <div class="t"><span class="sev red"></span>显著高于平均（严重）</div></div>
+  <div class="stat"><div class="n" style="color:var(--amber)">{{ cnt.warn }}</div>
+    <div class="t"><span class="sev amber"></span>略高于平均（注意）</div></div>
+  <div class="stat"><div class="n">{{ info.n }}</div><div class="t">总比对数</div></div>
+</div>
+</div>
+
+<div class="card">
+<h2>判定方式</h2>
+<pre>操作题答案天然相似 —— 全班都在做同一个素材，
+相似度 0.9+ 是正常的。所以这里用「双轨判定」：
+
+  轨道一（硬证据）  两份答卷的核心作答内容逐字节相同    → 严重
+  轨道二（相对基线）高出全班平均 {{ info.z_high }}σ     → 严重
+                    高出全班平均 {{ info.z_warn }}σ     → 注意
+
+只标出「比同学之间正常水平更可疑」的组合，而不是所有高分组合。</pre>
+</div>
+
+{% if suspects %}
+<div class="card">
+<h2>可疑组合（{{ suspects|length }} 对）</h2>
+<table>
+  <tr><th>学生A</th><th>学生B</th><th>综合</th><th>偏离</th>
+      <th>文本</th><th>结构</th><th>内容全同</th><th>判定</th></tr>
+  {% for s in suspects %}
+  <tr>
+    <td>{{ s.a }}</td>
+    <td>{{ s.b }}</td>
+    <td class="mono">{{ '%.3f'|format(s.score) }}</td>
+    <td class="mono">{{ '%+.2f'|format(s.z) }}σ</td>
+    <td class="mono">{{ s.text }}</td>
+    <td class="mono">{{ s.struct }}</td>
+    <td>{% if s.identical %}<span class="tag no">是</span>{% else %}-{% endif %}</td>
+    <td>{{ verdict[s.verdict] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% else %}
+<div class="card">
+<p class="tag ok" style="padding:10px;font-size:14px">{{ icon('check') }} 未发现异常相似的组合</p>
+</div>
+{% endif %}
+
+<div class="card">
+<h2>相似度最高的 10 对（供参考）</h2>
+<table>
+  <tr><th>学生A</th><th>学生B</th><th>综合</th><th>偏离</th><th>判定</th></tr>
+  {% for s in pairs[:10] %}
+  <tr>
+    <td>{{ s.a }}</td>
+    <td>{{ s.b }}</td>
+    <td class="mono">{{ '%.3f'|format(s.score) }}</td>
+    <td class="mono">{{ '%+.2f'|format(s.z) }}σ</td>
+    <td>{{ verdict[s.verdict] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+<div class="card">
+<h2>{{ icon('alert', 15) }} 使用提醒</h2>
+<p>学生做同一道题，答案天然相似。<b>绝对相似度高不等于抄袭。</b></p>
+<p class="muted">
+  「内容完全相同」是最硬的证据（连无关格式、随手填的备注都一样）。<br>
+  其余等级请打开两份文件人工复核后再下结论。<br>
+  本工具提供的是线索，不是最终判定。
+</p>
+</div>
+
+{% endblock %}

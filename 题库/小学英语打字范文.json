@@ -1,0 +1,16 @@
+[
+  {"grade": "三年级", "kind": "字母", "title": "26 个英文字母（小写）", "text": "a b c d e f g h i j k l m n o p q r s t u v w x y z"},
+  {"grade": "三年级", "kind": "字母", "title": "26 个英文字母（大写）", "text": "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z"},
+  {"grade": "三年级", "kind": "单词", "title": "动物单词（短）", "text": "cat dog pig cow duck bird fish panda bear lion tiger monkey"},
+  {"grade": "三年级", "kind": "单词", "title": "学习用品（短）", "text": "book pen pencil bag ruler desk chair eraser schoolbag crayon"},
+  {"grade": "三年级", "kind": "句子", "title": "早上好（短）", "text": "Good morning, teacher! Good morning, class! How are you? I am fine, thank you."},
+  {"grade": "三年级", "kind": "句子", "title": "我的一天（中）", "text": "I get up at six thirty. I go to school at seven. I have four classes in the morning and two in the afternoon. I like English and music very much."},
+  {"grade": "四年级", "kind": "短文", "title": "My Family（中）", "text": "My name is Tom. I am nine years old. There are four people in my family. My father is a doctor and my mother is a teacher. I have a little sister. I love them very much."},
+  {"grade": "四年级", "kind": "短文", "title": "My School（中）", "text": "My school is big and beautiful. There are many trees and flowers in it. I study Chinese, maths and English at school. The playground is very large. I like playing football with my friends there."},
+  {"grade": "五年级", "kind": "短文", "title": "Ya'an, the Rain City（中·雅安）", "text": "Ya'an is a small but beautiful city. It rains a lot here, so people call it the Rain City. The mountains are green and the river is clean. There are lovely pandas in Bifengxia."},
+  {"grade": "五年级", "kind": "短文", "title": "A Happy Weekend（中）", "text": "Last weekend was sunny. I went to the park with my parents. We saw many birds and took a lot of photos. We ate some nice food for lunch. It was a happy day."},
+  {"grade": "六年级", "kind": "短文", "title": "My Day at School（长）", "text": "I go to school from Monday to Friday. I get up early in the morning and have breakfast at home. Then I walk to school with my sister. We have four classes in the morning. At noon we have lunch in the dining hall. In the afternoon we have two classes and do sports on the playground. I like my school life very much."},
+  {"grade": "六年级", "kind": "短文", "title": "The Four Seasons（长）", "text": "There are four seasons in a year. Spring is warm. The flowers and trees come back to life. Summer is hot. Children like swimming in the river. Autumn is cool. The leaves turn yellow and red. Winter is cold. We can see snow on the mountains and make snowmen together."},
+  {"grade": "通用", "kind": "韵律", "title": "Twinkle, Twinkle, Little Star（传统儿歌）", "text": "Twinkle, twinkle, little star, how I wonder what you are. Up above the world so high, like a diamond in the sky."},
+  {"grade": "通用", "kind": "韵律", "title": "Rain, Rain, Go Away（传统儿歌）", "text": "Rain, rain, go away, come again another day. Little children want to play, rain, rain, go away."}
+]

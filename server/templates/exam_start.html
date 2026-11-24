@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}开始考试 - {{ exam.title }}{% endblock %}
+{% block body %}
+
+<div class="card" style="max-width:720px;margin:0 auto">
+  <h1 style="margin-bottom:6px">开始考试</h1>
+  <p class="muted" style="margin-bottom:18px">
+    点「确认开始」后，学生机立刻进入答题界面。开考后**不能改题目和时长**，
+    要改只能先结束这场考试。
+  </p>
+
+  <div style="border:1px solid var(--line);border-radius:var(--r-s);
+              padding:14px 16px;margin-bottom:18px;background:var(--line-2)">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:1.0625rem;font-weight:700">{{ exam.title }}</span>
+      {% if exam.code %}<span class="tag code">{{ exam.code }}</span>{% endif %}
+    </div>
+    <div class="muted" style="margin-top:8px">
+      考试时长 <b>{{ exam.duration }}</b> 分钟（理论题 <b>{{ theory_n }}</b> 题{% if prac_n %}、实操题 <b>{{ prac_n }}</b> 道{% endif %}，共用一个倒计时）
+    </div>
+  </div>
+
+  {% if warn %}
+  <div class="flash" style="background:var(--amber-l);color:var(--orange-d);
+                           border-color:#fde68a;margin-bottom:18px">
+    <b>开考前请确认：</b>
+    <ul style="margin:8px 0 0 18px;padding:0">
+      {% for w in warn %}<li>{{ w }}</li>{% endfor %}
+    </ul>
+    <div style="margin-top:6px">这些不影响开考，但学生那边可能会出问题。</div>
+  </div>
+  {% endif %}
+
+  <form method="post">
+    <div class="row">
+      <label style="min-width:120px">班级（必填）</label>
+      <input type="text" name="klass" value="{{ klass }}" required
+             style="width:260px" placeholder="例如：高一（3）班"
+             autocomplete="off">
+    </div>
+    <p class="muted" style="margin:-6px 0 16px 0">
+      学生交上来的答卷会按班级归档到服务器的
+      <code>uploads/ikee_Exam/班级/</code> 里，方便按班整理和打包下载。
+      同一个班连考几场就都填同一个班级名。
+    </p>
+
+    <div class="bar">
+      <button class="btn green lg" type="submit">
+        {{ icon('play') }} 确认开始考试</button>
+      <a class="btn ghost" href="/">取消，返回控制台</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

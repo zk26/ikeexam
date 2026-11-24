@@ -1,0 +1,532 @@
+[
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "二进制数 1010 对应的十进制数是？",
+    "options": ["A. 8", "B. 10", "C. 12", "D. 14"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列 IP 地址中，格式合法的是？",
+    "options": ["A. 256.1.1.1", "B. 192.168.1.1", "C. 1.2.3", "D. 192.168.1"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "计算机病毒的本质是？",
+    "options": ["A. 细菌", "B. 一段特殊程序", "C. 硬件故障", "D. 数据文件"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于系统软件的是？",
+    "options": ["A. Word", "B. Windows 操作系统", "C. 微信", "D. 扫雷游戏"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "信息的基本特征不包括下列哪一项？",
+    "options": ["A. 可传递", "B. 可共享", "C. 可增值", "D. 不可处理"],
+    "answer": "D",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "在 Python 中，表达式 list(range(1, 5)) 的结果是？",
+    "options": ["A. [1, 2, 3, 4]", "B. [1, 2, 3, 4, 5]", "C. [0, 1, 2, 3, 4]", "D. [2, 3, 4, 5]"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于输入设备的是？",
+    "options": ["A. 显示器", "B. 打印机", "C. 键盘", "D. 音箱"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "计算机网络的主要功能是？",
+    "options": ["A. 资源共享和数据通信", "B. 只能玩游戏", "C. 只能收发邮件", "D. 只能存储文件"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列电子邮件地址格式正确的是？",
+    "options": ["A. abc@", "B. abc@163.com", "C. abc.163.com", "D. @163.com"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "算法的时间复杂度描述的是？",
+    "options": ["A. 运行时间随输入规模的变化", "B. 程序的代码行数", "C. 变量的个数", "D. 注释的多少"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于输出设备的是？",
+    "options": ["A. 鼠标", "B. 扫描仪", "C. 打印机", "D. 麦克风"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在 Internet 中，用来唯一标识一台主机地址的是？",
+    "options": ["A. 域名", "B. IP 地址", "C. 邮件地址", "D. 用户名"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列关于计算机病毒的说法，错误的是？",
+    "options": ["A. 病毒可以通过网络传播", "B. 病毒可能破坏数据", "C. 安装杀毒软件能完全杜绝病毒", "D. 不随意打开陌生链接能减少感染风险"],
+    "answer": "C",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在 Excel 中，求单元格 A1 到 A10 之和的函数是？",
+    "options": ["A. =AVERAGE(A1:A10)", "B. =SUM(A1:A10)", "C. =MAX(A1:A10)", "D. =COUNT(A1:A10)"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "在 Python 中，下列属于比较运算（结果为布尔值）的是？",
+    "options": ["A. a = b", "B. a == b", "C. a + b", "D. a and b"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列关于信息安全的做法，正确的是？",
+    "options": ["A. 使用生日作为密码", "B. 定期更换密码", "C. 把密码告诉所有人", "D. 所有网站用同一个密码"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "数据在计算机内部最终是以什么形式存储的？",
+    "options": ["A. 十进制", "B. 二进制", "C. 八进制", "D. 十六进制"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "下列不属于关系型数据库管理系统的是？",
+    "options": ["A. MySQL", "B. SQLite", "C. SQL Server", "D. 记事本"],
+    "answer": "D",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在 Windows 中，用于复制选定内容的快捷键是？",
+    "options": ["A. Ctrl+C", "B. Ctrl+V", "C. Ctrl+X", "D. Ctrl+Z"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "信息可以被传递、共享和处理。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "计算机病毒能够自我复制。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "使用 HTTPS 协议比 HTTP 协议传输数据更安全。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "在 Python 中，用单个等号 = 可以判断两个值是否相等。",
+    "options": ["正确", "错误"],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "数据库管理系统（DBMS）属于系统软件。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "删除文件后，文件就再也无法恢复。",
+    "options": ["正确", "错误"],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "一个字节（Byte）由 ____ 个二进制位（bit）组成。",
+    "options": [],
+    "answer": "8",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "计算机中央处理器的英文缩写是 ____。",
+    "options": [],
+    "answer": "CPU",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在 Python 中，向屏幕输出内容的函数是 ____。",
+    "options": [],
+    "answer": "print",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·信息技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "万维网的英文缩写是 ____。",
+    "options": [],
+    "answer": "WWW",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "技术具有目的性、创新性、综合性、两面性等性质，其中「两面性」指的是？",
+    "options": ["A. 技术既可能带来好处也可能带来危害", "B. 技术只有好处", "C. 技术只有危害", "D. 技术与人类无关"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "设计的一般过程中，首先要做的是？",
+    "options": ["A. 发现与明确问题", "B. 制作模型", "C. 测试评估", "D. 优化改进"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在三视图中，从物体正前方看到的投影图是？",
+    "options": ["A. 主视图", "B. 俯视图", "C. 左视图", "D. 剖视图"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "结构保持其原有平衡状态的能力称为？",
+    "options": ["A. 稳定性", "B. 强度", "C. 刚度", "D. 韧性"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "下列连接方式中，属于「刚连接」的是？",
+    "options": ["A. 焊接", "B. 铰链连接", "C. 螺栓连接", "D. 插接"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "控制系统中，输出量不反馈回输入端参与控制的系统称为？",
+    "options": ["A. 开环控制系统", "B. 闭环控制系统", "C. 自动控制系统", "D. 手动控制系统"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "为了提高流程的效率，常采用的方法是？",
+    "options": ["A. 对流程进行优化，适当并行", "B. 增加不必要的环节", "C. 取消质量检验", "D. 去掉安全措施"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "系统的整体性主要体现为？",
+    "options": ["A. 整体功能大于各部分功能之和", "B. 各部分功能大于整体", "C. 系统固定不变", "D. 各要素互不相关"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "木工制作中，我国传统木结构常用的连接方式是？",
+    "options": ["A. 榫卯连接", "B. 胶水粘接", "C. 铁钉连接", "D. 螺栓连接"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列材料中，属于天然材料的是？",
+    "options": ["A. 塑料", "B. 木材", "C. 钢铁", "D. 玻璃"],
+    "answer": "B",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "在控制系统中，温度传感器的作用是？",
+    "options": ["A. 检测温度并转换为信号", "B. 加热", "C. 显示温度", "D. 执行动作"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "设计一个产品时，首先应考虑的因素通常是？",
+    "options": ["A. 使用者的需求", "B. 颜色是否好看", "C. 包装是否精美", "D. 广告是否吸引人"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "进阶",
+    "source": "四川会考",
+    "stem": "下列属于「闭环控制系统」的是？",
+    "options": ["A. 空调自动调温", "B. 电风扇吹风", "C. 普通电灯照明", "D. 洗衣机定时洗衣"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "结构的强度是指结构抵抗什么的能力？",
+    "options": ["A. 抵抗被破坏的能力", "B. 保持平衡的能力", "C. 抵抗变形的能力", "D. 抵抗磨损的能力"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "技术图纸中，用来表达物体内部结构的视图是？",
+    "options": ["A. 剖视图", "B. 主视图", "C. 俯视图", "D. 左视图"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "下列属于金属加工工艺的是？",
+    "options": ["A. 车削", "B. 榫卯", "C. 编织", "D. 雕刻"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "single",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "一个系统可以被看作由相互关联的多个部分组成的整体，这体现了系统的？",
+    "options": ["A. 整体性", "B. 单一性", "C. 独立性", "D. 封闭性"],
+    "answer": "A",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "技术对人类社会只有积极作用。",
+    "options": ["正确", "错误"],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "结构重心越低，通常稳定性越好。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "闭环控制系统中包含反馈环节。",
+    "options": ["正确", "错误"],
+    "answer": "正确",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "设计是一个一次成型的活动，不需要反复修改。",
+    "options": ["正确", "错误"],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "judge",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "流程中的各个环节可以随意调换顺序，不影响结果。",
+    "options": ["正确", "错误"],
+    "answer": "错误",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "三视图包括主视图、俯视图和 ____ 视图。",
+    "options": [],
+    "answer": "左",
+    "score": 2
+  },
+  {
+    "qtype": "blank",
+    "category": "四川会考·通用技术",
+    "difficulty": "基础",
+    "source": "四川会考",
+    "stem": "在控制系统中，把输出量反馈到输入端与给定量比较的环节称为 ____。",
+    "options": [],
+    "answer": "反馈",
+    "score": 2
+  }
+]

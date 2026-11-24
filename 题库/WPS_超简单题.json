@@ -1,0 +1,130 @@
+[
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_save.png 这个按钮的作用是什么？",
+   "options": ["A. 保存文件", "B. 打开文件", "C. 打印文件", "D. 删除文件"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_new.png 这个按钮的作用是什么？",
+   "options": ["A. 新建文件", "B. 保存文件", "C. 关闭文件", "D. 打印文件"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_open.png 这个按钮的作用是什么？",
+   "options": ["A. 打开已经做好的文件", "B. 新建一个文件", "C. 删除文件", "D. 给文件改名"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_bold.png 这个按钮的作用是什么？",
+   "options": ["A. 把文字变粗（加粗）", "B. 把文字变斜", "C. 给文字加下划线", "D. 改变文字颜色"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_italic.png 这个按钮的作用是什么？",
+   "options": ["A. 让文字倾斜", "B. 让文字加粗", "C. 让文字居中", "D. 让文字变大"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_underline.png 这个按钮的作用是什么？",
+   "options": ["A. 给文字加下划线", "B. 给文字加删除线", "C. 让文字加粗", "D. 把文字换行"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_color.png 这个按钮用来做什么？",
+   "options": ["A. 改变文字的颜色", "B. 改变文字的大小", "C. 改变页面背景", "D. 让文字加粗"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_align_center.png 这个按钮的作用是什么？",
+   "options": ["A. 让文字居中", "B. 让文字靠左", "C. 让文字靠右", "D. 让文字两端对齐"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_align_right.png 这个按钮的作用是什么？",
+   "options": ["A. 让文字靠右对齐", "B. 让文字居中", "C. 让文字靠左对齐", "D. 让文字分散对齐"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_size.png 这个按钮一般用来做什么？",
+   "options": ["A. 设置文字的大小（字号）", "B. 设置文字的字体", "C. 设置页边距", "D. 插入表格"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_font.png 这个按钮一般用来做什么？",
+   "options": ["A. 设置文字的字体（如宋体、黑体）", "B. 设置字号", "C. 设置行距", "D. 插入图片"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_header.png 这个功能是给页面加什么？",
+   "options": ["A. 页眉（每页顶部都显示的内容）", "B. 页码", "C. 页脚", "D. 边框"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_sum.png 在 WPS 表格里，这个按钮最可能是做什么的？",
+   "options": ["A. 自动求和", "B. 求平均值", "C. 排序", "D. 筛选"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_merge_cells.png 这个按钮在表格里的作用是什么？",
+   "options": ["A. 把几个格子合并成一个（合并单元格）", "B. 把格子拆开",
+               "C. 删除表格", "D. 插入一个新表格"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_sort_up.png 这个按钮的作用是什么？",
+   "options": ["A. 从小到大（升序）排序", "B. 从大到小（降序）排序",
+               "C. 求和", "D. 筛选"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_sort_down.png 这个按钮的作用是什么？",
+   "options": ["A. 从大到小（降序）排序", "B. 从小到大排序", "C. 求平均", "D. 换行"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "img:btn_chart.png 这个按钮的作用是什么？",
+   "options": ["A. 插入图表（柱形图、饼图等）", "B. 插入表格",
+               "C. 插入图片", "D. 插入页码"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "在 WPS 表格里，A1 表示的是什么？",
+   "options": ["A. 第 A 列第 1 行的格子", "B. 第 1 列第 A 行的格子",
+               "C. 文件名", "D. 工作表的名字"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "要把 A1 到 A5 里的 5 个数字加起来，用哪个函数？",
+   "options": ["A. SUM", "B. AVERAGE", "C. MAX", "D. COUNT"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "在 WPS 表格里输入公式，开头要先输入什么符号？",
+   "options": ["A. 等号 =", "B. 加号 +", "C. 井号 #", "D. 星号 *"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS演示", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "WPS 演示是做哪种文件的软件？",
+   "options": ["A. 幻灯片（演示文稿）", "B. 电子表格", "C. 纯文字文档", "D. 图片"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS演示", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "在 WPS 演示里想再加一页，应该怎么做？",
+   "options": ["A. 点「新建幻灯片」", "B. 点「保存」", "C. 点「打印」", "D. 重新打开软件"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "在 WPS 文字里写字，想换到下一行继续写，按哪个键？",
+   "options": ["A. 回车键 Enter", "B. 空格键", "C. 退格键 Backspace", "D. Tab 键"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "字打错了，要删掉光标前面的一个字，按哪个键？",
+   "options": ["A. 退格键 Backspace", "B. 回车键 Enter", "C. 空格键", "D. Shift 键"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "要把整段文字变粗，正确的做法是？",
+   "options": ["A. 先用鼠标选中这段文字，再点加粗按钮", "B. 直接点加粗按钮",
+               "C. 先保存文件再点加粗", "D. 先打印再点加粗"], "answer": "A"},
+
+  {"qtype": "single", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "文档做好后，为了防止内容丢失，首先应该做什么？",
+   "options": ["A. 保存文件", "B. 打印出来", "C. 关闭窗口", "D. 关掉电脑"], "answer": "A"},
+
+  {"qtype": "judge", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "「居中对齐」是把文字放在这一行的正中间。",
+   "options": ["A. 对", "B. 错"], "answer": "A"},
+
+  {"qtype": "judge", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "字号越大，文字看起来越小。",
+   "options": ["A. 对", "B. 错"], "answer": "B"},
+
+  {"qtype": "judge", "category": "WPS文字", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "做完文档要养成随手保存的习惯，按 Ctrl+S 也能保存。",
+   "options": ["A. 对", "B. 错"], "answer": "A"},
+
+  {"qtype": "judge", "category": "WPS表格", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "把几个格子合成一个格子，叫「合并单元格」。",
+   "options": ["A. 对", "B. 错"], "answer": "A"},
+
+  {"qtype": "judge", "category": "WPS演示", "difficulty": "基础", "source": "自创题", "score": 2,
+   "stem": "WPS 演示做的文件，保存后默认的扩展名是 .pptx。",
+   "options": ["A. 对", "B. 错"], "answer": "A"}
+]
