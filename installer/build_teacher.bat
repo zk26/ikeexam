@@ -86,4 +86,3 @@ echo    构建完成！安装程序位于:
 echo    %CD%\ikeexam-teacher-setup.exe
 echo  ============================================
 echo.
-pause

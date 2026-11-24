@@ -13,6 +13,7 @@ dist/
 *.spec
 *.exe
 *.manifest
+installer/python-*.zip
 
 # ---- 敏感信息（密码 hash / 密钥，绝不能进仓库）----
 auth.json

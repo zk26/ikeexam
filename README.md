@@ -17,6 +17,24 @@
 - **成绩导出**：CSV / Excel 明细、按班级打包答卷、抄袭检测
 - **自动发现**：学生端 UDP 广播自动找到服务器，无需写死 IP
 
+## 运行截图
+
+| 老师端控制台（考试进行中） | 考试配置 · 从题库组卷 |
+|:---:|:---:|
+| ![老师端控制台](docs/screenshots/07-exam-running.png) | ![考试配置](docs/screenshots/06-exam-config.png) |
+
+| 学生端答题界面（计算机二级风格） | 学生端登录（姓名 + 座位号） |
+|:---:|:---:|
+| ![学生端答题](docs/screenshots/08-student-exam.png) | ![学生端登录](docs/screenshots/08-student-login.png) |
+
+| 题库管理（527 题内置） | 实操题库（WPS 三件套） |
+|:---:|:---:|
+| ![题库管理](docs/screenshots/03-questions.png) | ![实操题库](docs/screenshots/04-practice.png) |
+
+| 老师端登录 | 考试大屏（投屏用） |
+|:---:|:---:|
+| ![老师端登录](docs/screenshots/01-login.png) | ![考试大屏](docs/screenshots/05-screen.png) |
+
 ## 架构
 
 ```
