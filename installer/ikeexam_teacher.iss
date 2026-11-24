@@ -40,7 +40,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 LicenseFile=..\LICENSE
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Messages]
 WelcomeLabel1=欢迎安装 [name] —— 机房考试老师端
@@ -62,8 +62,8 @@ Name: "{app}\server"; Permissions: users-modify
 Name: "{app}\teacher"; Permissions: users-modify
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\teacher\teacher_app.py"""; WorkingDir: "{app}\teacher"; IconFilename: "{app}\client\app.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\teacher\teacher_app.py"""; WorkingDir: "{app}\teacher"; IconFilename: "{app}\client\app.ico"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\teacher\teacher_app.py"""; WorkingDir: "{app}\teacher"; IconFilename: "{app}\teacher\app.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\teacher\teacher_app.py"""; WorkingDir: "{app}\teacher"; IconFilename: "{app}\teacher\app.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\teacher\teacher_app.py"""; WorkingDir: "{app}\teacher"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent

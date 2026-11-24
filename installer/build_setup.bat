@@ -54,14 +54,22 @@ if exist "%RUNTIME%" rmdir /s /q "%RUNTIME%"
 powershell -NoProfile -Command "Expand-Archive -Path '%PY_ZIP%' -DestinationPath '%RUNTIME%' -Force"
 if errorlevel 1 ( echo 解压失败 & pause & exit /b 1 )
 
-rem 修改 python311._pth：启用 site 并挂上 Lib\site-packages（嵌入式 Python 默认不启用）
+rem 修改 python311._pth：启用 site 并挂上 Lib（tkinter 用）+ Lib\site-packages
 set PTH=%RUNTIME%\python311._pth
 (
     echo python311.zip
     echo .
+    echo Lib
     echo Lib\site-packages
     echo import site
 ) > "%PTH%"
+
+echo  [4.5/6] 补 tkinter（嵌入式 Python 不含，学生端界面需要）...
+if not exist "%RUNTIME%\Lib\tkinter\__init__.py" (
+    echo    解压 tkinter / tcl / tk 补丁（tkinter_patch.zip）
+    powershell -NoProfile -Command "Expand-Archive -Path 'tkinter_patch.zip' -DestinationPath '%RUNTIME%' -Force"
+    if errorlevel 1 ( echo    解压失败 & pause & exit /b 1 )
+)
 
 echo  [5/6] 安装依赖 (psutil / pillow) 到运行时 ...
 python -m pip install --target "%RUNTIME%\Lib\site-packages" ^

@@ -53,9 +53,17 @@ if errorlevel 1 ( echo 解压失败 & pause & exit /b 1 )
 (
     echo python311.zip
     echo .
+    echo Lib
     echo Lib\site-packages
     echo import site
 ) > "%RUNTIME%\python311._pth"
+
+echo  [4.5/6] 补 tkinter（嵌入式 Python 不含，老师端界面需要）...
+if not exist "%RUNTIME%\Lib\tkinter\__init__.py" (
+    echo    解压 tkinter / tcl / tk 补丁（tkinter_patch.zip）
+    powershell -NoProfile -Command "Expand-Archive -Path 'tkinter_patch.zip' -DestinationPath '%RUNTIME%' -Force"
+    if errorlevel 1 ( echo 解压失败 & pause & exit /b 1 )
+)
 
 echo  [5/6] 安装服务端依赖 (flask / openpyxl / docx / pptx / pyyaml / psutil) ...
 python -m pip install --target "%RUNTIME%\Lib\site-packages" ^
@@ -72,6 +80,7 @@ if exist "%APPSRV%" rmdir /s /q "%APPSRV%"
 if exist "%APPTEA%" rmdir /s /q "%APPTEA%"
 robocopy "..\server" "%APPSRV%" /E /XD __pycache__ build logs /XF *.pyc *.db auth.json secret.key *.toc >nul
 robocopy "..\teacher" "%APPTEA%" /E /XD __pycache__ /XF *.pyc config.json >nul
+copy /y "..\client\app.ico" "%APPTEA%\app.ico" >nul
 
 ISCC.exe "ikeexam_teacher.iss"
 if errorlevel 1 (
