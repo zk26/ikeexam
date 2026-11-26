@@ -2,13 +2,20 @@
 
 一个给机房用的完整考试系统：**先在线答理论题，再自动拉起 WPS 做实操题，交卷后自动评分出成绩。**
 
-- 作者：**小可**
+- 作者：**大茂小可 · 小可**
 - 网站：https://www.ikee002.top/
 - 仓库：https://github.com/zk26/ikeexam
 - License：[MIT](./LICENSE)
 
+<p align="center">
+  <img src="docs/sponsor-qr.png" width="220" alt="赞助作者二维码">
+  <br>
+  <sub>赞助一下作者 · 大茂小可</sub>
+</p>
+
 ## 功能特性
 
+- **桌面老师端**：Windows Tkinter 完整考务控制台，支持考试创建编辑、组卷、名单素材、启停切阶段、成绩导出、题库和学生机管理
 - **理论题**：单选 / 多选 / 判断 / 填空 / 程序填空（真跑代码判题）/ 拖拽题 / 打字题 / 画图题（小学模块）
 - **实操题**：Word / Excel / PPT 三件套，自动下发素材、自动拉起 WPS、一键回收答卷
 - **自动评分**：理论题即时判分；实操题按评分规则解析 docx/xlsx/pptx 自动打分
@@ -16,6 +23,8 @@
 - **防作弊**：定时查杀违禁进程、锁屏加固（可选严格模式）
 - **成绩导出**：CSV / Excel 明细、按班级打包答卷、抄袭检测
 - **自动发现**：学生端 UDP 广播自动找到服务器，无需写死 IP
+- **可视化配置**：评分规则、打字练习、画板题和拖拽槽位均通过表单配置，无需编写 JSON
+- **评讲与图表**：网页端和老师桌面端均支持逐题评讲、正确率分析、分数段、排名和实操评分点图表
 
 ## 运行截图
 
@@ -59,55 +68,56 @@
 
 ```bash
 # 1. 安装依赖
-pip install flask openpyxl python-docx python-pptx pyyaml psutil
+pip install flask openpyxl python-docx python-pptx pyyaml psutil pillow
 
 # 2. 启动服务端（Linux 部署；老师用浏览器访问网页后台）
-cd server
-python app.py
+python src/ikeexam/server/app.py
 # 打开 http://127.0.0.1:9000 进入后台（首次运行会提示设置初始密码）
 
 # 3. 学生端
-cd client
-python exam_client.py
+python src/ikeexam/client/exam_client.py
 
 # 4. 老师端桌面软件（Windows，可选：不装就继续用网页后台）
-cd teacher
-python teacher_app.py
+python src/ikeexam/teacher/teacher_app.py
 ```
 
 > 三个角色都有现成的安装程序（学生端 exe、老师端桌面 exe），见 [`installer/README.md`](./installer/README.md)。
+> 安装包默认创建桌面快捷方式；卸载入口位于开始菜单，卸载时可选择保留或删除本地全部内容。
 > 详细部署与使用见 [`使用说明.md`](./使用说明.md)。
 
 ## 目录结构
 
 ```
 ikeexam/
-├── server/           # 服务端（Flask 后台 + 判题沙箱）
-│   ├── app.py        # 主程序（路由 / 考试控制 / 成绩）
-│   ├── db.py         # SQLite 数据层
-│   ├── coderun.py    # 程序填空判题
-│   ├── sandbox.py    # 判题沙箱（资源限制）
-│   └── templates/    # 老师端页面
-├── client/           # 学生端（tkinter）
-│   ├── exam_client.py
-│   ├── gui.py
-│   └── ...           # 各题型 UI / 运行器 / 守卫
-├── teacher/          # 老师端桌面软件（Windows，原生 tkinter）
-│   ├── teacher_app.py
-│   └── api.py        # 管理员 HTTP 客户端
-├── installer/        # Inno Setup 安装程序（学生端 + 老师端）
-├── graders/          # 实操题评分器（word/excel/ppt）
-├── 题库/             # 内置题库（含四川会考模拟题）
-├── auto_rule.py      # 标准答案 → 评分规则
-├── plagiarism.py     # 抄袭检测
-└── grade.py          # 命令行评分工具
+├── src/ikeexam/             # Unified Python application package
+│   ├── server/              # Flask server, data layer, judge sandbox
+│   │   ├── app.py           # Routes, exam control, scores
+│   │   ├── db.py            # SQLite data layer
+│   │   ├── coderun.py       # Program-fill judge
+│   │   ├── sandbox.py       # Judge resource sandbox
+│   │   └── templates/       # Teacher web pages
+│   ├── client/              # Tkinter student client
+│   │   ├── exam_client.py
+│   │   └── gui.py
+│   ├── teacher/             # Tkinter teacher desktop
+│   │   ├── teacher_app.py
+│   │   └── api.py           # Admin HTTP client
+│   ├── graders/             # Word / Excel / PPT graders
+│   ├── shared/              # Shared theme and visual config schema
+│   └── tools/               # CLI maintenance tools
+├── tests/                   # Server / client / teacher regression tests
+├── installer/               # Inno Setup scripts and bundle validation
+├── 题库/                    # Built-in question banks
+├── materials/               # Practice materials
+├── qimg/                    # Question images
+└── docs/                    # Documentation and brand assets
 ```
 
 ---
 
 ## OJ 判题模块（代码题 / 程序填空）
 
-程序填空（`qtype="code"`）判题分两级（`server/db.py` 的 `judge()` + `server/coderun.py` + `server/sandbox.py`）：
+程序填空（`qtype="code"`）判题分两级（`src/ikeexam/server/db.py` 的 `judge()` + `src/ikeexam/server/coderun.py` + `src/ikeexam/server/sandbox.py`）：
 
 1. **优先「真跑一遍比对输出」**：老师给题目配了 `expected_output` 后，把学生填好的代码真的执行一遍，输出归一化后与期望输出一致即满分。因为正确写法穷举不完（`range(1,11)` vs `range(1, 11)`、`for` vs `while`），不匹配参考答案。
 2. **回退「按空给分」**：没配期望输出 / 空没填完 / 环境缺失时，退化为「对几个空得几分」的参考答案匹配。
@@ -117,7 +127,7 @@ ikeexam/
 | 返回值 | 含义 | db 层动作 |
 | --- | --- | --- |
 | `True` | 跑了且输出一致 | 满分 |
-| `False` | 跑了但输出不一致 | 按空给分回退 |
+| `False` | 实际运行但输出不一致 / 运行失败 | 0 分，不再回退 |
 | `None` | 没配期望输出 / 空没填完 / 环境缺失 | 按空给分回退 |
 | `"error"` | 判题机自身异常（排队超时 / 内部 bug） | 标记待重判 + 按空给分回退 |
 
@@ -130,7 +140,7 @@ ikeexam/
 2. 让整个 Web 服务以 ojrunner 运行（推荐 systemd）
 3. 收紧项目文件权限：`chmod -R 750 /opt/ikeexam`
 4. root 运行时配置 `SANDBOX_UID` / `SANDBOX_GID`，沙箱用 `setpriv` 降权
-5. 能力边界：无系统调用拦截、无网络隔离、MLE 靠 stderr 关键词推断
+5. 能力边界：无系统调用拦截、无网络隔离；Windows 使用 Job Object 限制内存和子进程数，输出落盘并监控大小，但仍以服务账户权限运行
 
 **本沙箱仅适用于局域网可信环境**。若要对公网开放，必须换 Docker + isolate（或等价硬隔离方案）。
 
@@ -143,12 +153,13 @@ ikeexam/
 | `SANDBOX_UID` / `SANDBOX_GID` | 空 | root 下用 setpriv 降权的目标用户/组 |
 | `OJ_MEM_LIMIT_KB` | `512000` | 判题内存上限（地址空间） |
 | `EXAM_CODE_PREFIX` | `ikeexam` | 考试编号前缀 |
+| `EXAM_ALLOW_REMOTE_SETUP` | 空 | 设为 `1` 才允许远程机器进行首次设密；默认仅本机 |
 
 ### 本地验证
 
 ```bash
-python server/test_oj.py      # 判题模块单元测试
-python server/coderun.py      # 单个判题 demo
+python tests/server/test_oj.py      # 判题模块单元测试
+python src/ikeexam/server/coderun.py # 单个判题 demo
 ```
 
 ## License

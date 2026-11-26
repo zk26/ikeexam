@@ -15,7 +15,7 @@ cd "$(dirname "$0")"
 
 PROJECT_DIR="$(pwd)"
 VENV_DIR="$PROJECT_DIR/venv"
-SERVER_DIR="$PROJECT_DIR/server"
+SERVER_DIR="$PROJECT_DIR/src/ikeexam/server"
 
 LAN_IP=""
 PORT=9000

@@ -6,7 +6,7 @@ echo   ikee考务中心 服务器启动
 echo ==========================================
 echo.
 
-cd /d "%~dp0server"
+cd /d "%~dp0src\ikeexam\server"
 
 echo [1/3] 检查 Python...
 python --version >nul 2>&1

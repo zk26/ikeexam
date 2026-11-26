@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>考试大屏 - {{ exam.title if exam else server_name }}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+     background:#0b1220;color:#e2e8f0;min-height:100vh;padding:20px 28px}
+.head{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+      border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:16px}
+.head .title{font-size:2rem;font-weight:700;color:#f8fafc}
+.head .phase{font-size:1.1rem;padding:4px 16px;border-radius:20px;
+     background:#1d4ed8;color:#fff;font-weight:600}
+.head .phase.ended{background:#475569}
+.head .clock{margin-left:auto;font-size:2.2rem;font-weight:700;
+     font-family:Consolas,monospace;color:#38bdf8}
+.head .clock.over{color:#f87171}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+.stat{background:#111c30;border:1px solid #1e293b;border-radius:12px;
+      padding:14px;text-align:center}
+.stat .n{font-size:2.1rem;font-weight:700;color:#f8fafc;line-height:1.2}
+.stat .n.green{color:#4ade80}.stat .n.blue{color:#38bdf8}.stat .n.amber{color:#fbbf24}
+.stat .t{font-size:.85rem;color:#94a3b8;margin-top:4px}
+
+/* 图表区 */
+.charts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}
+.chart{background:#111c30;border:1px solid #1e293b;border-radius:12px;padding:10px 12px}
+.chart h3{font-size:.9rem;color:#94a3b8;font-weight:600;margin-bottom:4px}
+.chart .cv{width:100%;height:190px}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.cell{background:#111c30;border:1px solid #1e293b;border-radius:10px;
+      padding:10px 14px;display:flex;flex-direction:column;gap:2px}
+.cell .who{font-size:1rem;font-weight:600;color:#f1f5f9;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .sub{font-size:.75rem;color:#94a3b8}
+.cell.done{border-color:#166534;background:#0d2818}
+.cell.done .st{color:#4ade80}
+.cell.off{opacity:.55}
+.st{font-size:.8rem;font-weight:600;color:#38bdf8}
+.empty{text-align:center;color:#64748b;padding:40px 0;font-size:1.05rem}
+.foot{margin-top:16px;text-align:center;color:#475569;font-size:.75rem}
+@media (max-width:1000px){.charts{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="head">
+  <span class="title" id="h-title">{{ exam.title if exam else server_name }}</span>
+  <span class="phase {% if exam and exam.status == 'stopped' %}ended{% endif %}" id="h-phase">
+    {% if exam %}{{ '考试已结束' if exam.status == 'stopped' else ('已暂停' if exam.status == 'paused' else phase_cn) }}
+    {% else %}等待考试开始{% endif %}
+  </span>
+  {% if remaining is not none and exam and exam.status == 'running' %}
+    <span class="clock" id="clock" data-left="{{ remaining }}">--:--</span>
+  {% elif exam and exam.status == 'paused' %}
+    <span class="clock over" id="clock">已暂停</span>
+  {% else %}
+    <span class="clock" id="clock" style="display:none"></span>
+  {% endif %}
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="n" id="s-total">{{ stats.students }}</div><div class="t">学生总数</div></div>
+  <div class="stat"><div class="n blue" id="s-online">{{ stats.online }}</div><div class="t">当前在线</div></div>
+  <div class="stat"><div class="n green" id="s-submitted">{{ stats.submitted }}</div><div class="t">已交卷</div></div>
+  <div class="stat"><div class="n amber" id="s-rate">
+    {{ (stats.submitted / stats.students * 100) | round(0) | int if stats.students else 0 }}%
+  </div><div class="t">交卷率</div></div>
+</div>
+
+<div class="charts">
+  <div class="chart">
+    <h3>交卷进度</h3>
+    <div class="cv" id="c-submit"></div>
+  </div>
+  <div class="chart">
+    <h3>理论 / 实操 完成情况</h3>
+    <div class="cv" id="c-progress"></div>
+  </div>
+  <div class="chart">
+    <h3>当前分数段分布</h3>
+    <div class="cv" id="c-dist"></div>
+  </div>
+</div>
+
+<div id="grid-wrap">
+{% if rows %}
+<div class="grid" id="grid">
+  {% for r in rows %}
+  <div class="cell {{ 'done' if r.submitted }} {{ 'off' if not r.online }}">
+    <span class="who">
+      {% if r.seat %}{{ r.seat }}号 {% endif %}{{ r.name or '学生' }}
+    </span>
+    <span class="st" data-st="{{ r.status }}">
+      {{ r.status }}
+      {% if theory_total and not r.submitted %} · 理论 {{ r.theory_n }}/{{ theory_total }}{% endif %}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty" id="empty">暂无学生机连接</div>
+{% endif %}
+</div>
+
+<div class="foot">{{ server_name }} · 每 3 秒自动刷新 · 本页为公开进度页，不含答案等敏感信息</div>
+
+<!-- ECharts 本地文件：机房无外网也能用 -->
+<script src="/static/echarts.min.js"></script>
+<script>
+/* ============================================================
+   大屏：3 秒局部刷新（不再整页 meta refresh，图表不会闪）
+   ============================================================ */
+var DATA_DIST = {{ dist|tojson }};
+var THEORY_DONE = {{ theory_done }}, PRACTICE_DONE = {{ practice_done }};
+var THEORY_TOTAL = {{ theory_total or 0 }};
+
+function darkBase() {
+  return {
+    textStyle: { fontFamily: 'Microsoft YaHei, sans-serif', color: '#94a3b8',
+                 fontSize: 12 },
+    tooltip: { trigger: 'item' }
+  };
+}
+
+/* 交卷进度环形图 */
+function drawSubmit(stats) {
+  var el = document.getElementById('c-submit');
+  if (!el) return;
+  var total = stats.students || 0, done = stats.submitted || 0;
+  var ins = echarts.getInstanceByDom(el) || echarts.init(el);
+  if (!total) { el.innerHTML = '<div class="empty" style="padding:60px 0">暂无学生</div>';
+                return; }
+  ins.setOption({
+    textStyle: { fontFamily: 'Microsoft YaHei, sans-serif' },
+    tooltip: { trigger: 'item', formatter: '{b}: {c} 人（{d}%）' },
+    legend: { bottom: 0, textStyle: { color: '#94a3b8' },
+              itemWidth: 10, itemHeight: 10 },
+    series: [{
+      type: 'pie', radius: ['55%', '78%'], center: ['50%', '46%'],
+      itemStyle: { borderColor: '#111c30', borderWidth: 2 },
+      label: { color: '#e2e8f0', formatter: '{b}\n{c}' },
+      data: [
+        { name: '已交卷', value: done, itemStyle: { color: '#4ade80' } },
+        { name: '未交卷', value: Math.max(0, total - done),
+          itemStyle: { color: '#334155' } }
+      ]
+    }]
+  }, true);
+}
+
+/* 理论/实操完成情况：柱状 */
+function drawProgress(theoryDone, practiceDone, total) {
+  var el = document.getElementById('c-progress');
+  if (!el) return;
+  var ins = echarts.getInstanceByDom(el) || echarts.init(el);
+  ins.setOption({
+    textStyle: { fontFamily: 'Microsoft YaHei, sans-serif' },
+    grid: { left: 8, right: 20, top: 20, bottom: 8, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    xAxis: { type: 'value', max: Math.max(total, 1),
+             axisLabel: { color: '#64748b' },
+             splitLine: { lineStyle: { color: '#1e293b' } } },
+    yAxis: { type: 'category', data: ['理论题已交', '实操题已交'],
+             axisLabel: { color: '#94a3b8' },
+             axisLine: { lineStyle: { color: '#1e293b' } } },
+    series: [{
+      type: 'bar', barMaxWidth: 22,
+      label: { show: true, position: 'right', color: '#e2e8f0',
+               formatter: '{c} 人' },
+      data: [
+        { value: theoryDone, itemStyle: { color: '#38bdf8',
+          borderRadius: [0, 4, 4, 0] } },
+        { value: practiceDone, itemStyle: { color: '#4ade80',
+          borderRadius: [0, 4, 4, 0] } }
+      ]
+    }]
+  }, true);
+}
+
+/* 分数段分布 */
+function drawDist(dist) {
+  var el = document.getElementById('c-dist');
+  if (!el) return;
+  var values = (dist && dist.values) || [];
+  var sum = values.reduce(function (a, b) { return a + b; }, 0);
+  if (!sum) { el.innerHTML = '<div class="empty" style="padding:60px 0">暂无分数数据</div>';
+              return; }
+  var ins = echarts.getInstanceByDom(el) || echarts.init(el);
+  ins.setOption({
+    textStyle: { fontFamily: 'Microsoft YaHei, sans-serif' },
+    grid: { left: 8, right: 16, top: 24, bottom: 8, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    xAxis: { type: 'category',
+      data: ['<60', '60-69', '70-79', '80-89', '90-100'],
+      axisLabel: { color: '#94a3b8', fontSize: 11 },
+      axisLine: { lineStyle: { color: '#1e293b' } } },
+    yAxis: { type: 'value', axisLabel: { color: '#64748b' },
+             splitLine: { lineStyle: { color: '#1e293b' } } },
+    series: [{
+      type: 'bar', barMaxWidth: 34,
+      label: { show: true, position: 'top', color: '#e2e8f0' },
+      itemStyle: { borderRadius: [4, 4, 0, 0] },
+      data: [
+        { value: values[0], itemStyle: { color: '#dc2626' } },
+        { value: values[1], itemStyle: { color: '#f59e0b' } },
+        { value: values[2], itemStyle: { color: '#facc15' } },
+        { value: values[3], itemStyle: { color: '#3b82f6' } },
+        { value: values[4], itemStyle: { color: '#16a34a' } }
+      ]
+    }]
+  }, true);
+}
+
+/* ---------- 倒计时（本地每秒走） ---------- */
+var clockEl = document.getElementById('clock');
+var left = clockEl ? parseInt(clockEl.dataset.left || '-1', 10) : -1;
+function tick() {
+  if (!clockEl || left < 0) return;
+  var m = Math.floor(left / 60), s = left % 60;
+  clockEl.textContent = (m < 10 ? '0' + m : m) + ':' + (s < 10 ? '0' + s : s);
+  if (left <= 0) { clockEl.classList.add('over'); return; }
+  left--;
+  setTimeout(tick, 1000);
+}
+tick();
+
+/* ---------- 局部刷新 ---------- */
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function fmtCell(r, theoryTotal) {
+  var cls = 'cell' + (r.submitted ? ' done' : '') + (r.online ? '' : ' off');
+  var extra = (theoryTotal && !r.submitted)
+    ? ' · 理论 ' + r.theory_n + '/' + theoryTotal : '';
+  var who = (r.seat ? r.seat + '号 ' : '') + (r.name || '学生');
+  return '<div class="' + cls + '">'
+    + '<span class="who">' + esc(who) + '</span>'
+    + '<span class="st">' + esc(r.status) + extra + '</span></div>';
+}
+
+function refresh() {
+  fetch('/screen.json', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      // 头部
+      var t = document.getElementById('h-title');
+      if (t) t.textContent = d.exam ? d.exam.title : d.server_name;
+      var p = document.getElementById('h-phase');
+      if (p) {
+        p.textContent = d.exam
+          ? (d.exam.status === 'stopped' ? '考试已结束'
+             : d.exam.status === 'paused' ? '已暂停' : d.phase_cn)
+          : '等待考试开始';
+        p.className = 'phase' + (d.exam && d.exam.status === 'stopped' ? ' ended' : '');
+      }
+      if (clockEl && d.remaining !== null && d.remaining !== undefined
+          && d.exam && d.exam.status === 'running') {
+        left = d.remaining;
+        clockEl.style.display = '';
+      }
+      // 统计
+      setN('s-total', d.stats.students);
+      setN('s-online', d.stats.online);
+      setN('s-submitted', d.stats.submitted);
+      setN('s-rate', d.stats.students
+        ? Math.round(d.stats.submitted / d.stats.students * 100) + '%' : '0%');
+      // 学生格子
+      var wrap = document.getElementById('grid-wrap');
+      if (wrap) {
+        if (!d.rows.length) {
+          wrap.innerHTML = '<div class="empty">暂无学生机连接</div>';
+        } else {
+          wrap.innerHTML = '<div class="grid" id="grid">'
+            + d.rows.map(function (r) { return fmtCell(r, d.theory_total); }).join('')
+            + '</div>';
+        }
+      }
+      // 图表
+      drawSubmit(d.stats);
+      drawProgress(d.theory_done, d.practice_done, d.stats.students);
+      drawDist(d.dist);
+    })
+    .catch(function () {});
+}
+function setN(id, v) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = v;
+}
+
+/* 首屏先画一次，然后每 3 秒刷新 */
+drawSubmit({ students: {{ stats.students }}, submitted: {{ stats.submitted }} });
+drawProgress(THEORY_DONE, PRACTICE_DONE, {{ stats.students }});
+drawDist(DATA_DIST);
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

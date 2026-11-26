@@ -1,0 +1,1378 @@
+{% extends "base.html" %}
+{% block title %}配置考试{% endblock %}
+{% block body %}
+
+<div class="row" style="justify-content:space-between;margin-bottom:16px">
+  <h1 style="margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    {{ exam.title }}
+    {% if exam.code %}<span class="tag code" title="考试编号（新建时自动生成）">{{ exam.code }}</span>{% endif %}
+    {% if exam.klass %}<span class="tag gray">班级：{{ exam.klass }}</span>
+    {% else %}<span class="tag gray" title="点「开始考试」时会让你填班级">未分班</span>{% endif %}
+  </h1>
+  <div class="bar" style="margin:0">
+    <a class="btn ghost" href="/">← 返回控制台</a>
+    <a class="btn ghost" href="/exam/{{ exam.id }}/export">导出考试包</a>
+  </div>
+</div>
+
+{% set qtype_tabs = [('single','单选题'),('multi','多选题'),('judge','判断题'),
+                     ('blank','填空题'),('drag','拖拽题'),('code','程序填空')] %}
+{# 老师要求：题型设置全都在标签栏里，一个都不藏；
+   勾不勾这场考由每个题型页开头的「本场考试考…」开关决定。 #}
+{% set type_tabs = namespace(items=[('basic','基本设置')]) %}
+{% for k, l in qtype_tabs %}
+  {% if type_tabs.items.append((k, l)) %}{% endif %}
+{% endfor %}
+{% if type_tabs.items.append(('practice','实操')) %}{% endif %}
+{% if type_tabs.items.append(('typing','打字')) %}{% endif %}
+{% if type_tabs.items.append(('drawing','画板')) %}{% endif %}
+{% set selected_qids = qs | map(attribute='id') | list %}
+{% set all_keys = [] %}
+{% for k, l in type_tabs.items %}{% if all_keys.append(k) %}{% endif %}{% endfor %}
+{% set active = active_tab if active_tab in all_keys else 'basic' %}
+
+{% if exam.status in ('running', 'paused') %}
+<div class="note warn">
+  <b>这场考试{{ '已暂停' if exam.status == 'paused' else '正在进行中' }}，配置已锁定。</b>
+  现在改题目、时长或素材，会让学生手里的卷子和服务器对不上，所以先不让你改。
+  要调整请回控制台点「结束考试」，考完再改。
+  <br>考试期间照常可用：看成绩、重新评分、打印成绩单、投「大屏」。
+</div>
+{% endif %}
+
+<!-- 勾选自动保存的小提示（右上角，一闪而过） -->
+<span id="quickTip" style="display:none;position:fixed;top:14px;right:18px;z-index:99;
+      background:var(--green);color:#fff;padding:6px 14px;border-radius:20px;
+      font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.18)"></span>
+
+<!-- 标签页导航（全部题型都在这里；绿点 = 这场考它） -->
+<div style="display:flex;gap:0;border-bottom:2px solid var(--line);margin-bottom:16px;
+            flex-wrap:wrap" id="tab-nav">
+  {% for k, l in type_tabs.items %}
+  <button type="button" class="tab-btn{% if k == active %} active{% endif %}" data-tab="{{ k }}"
+          onclick="showTab('{{ k }}')">{{ l }}<span class="dot" title="这场考试考这个题型"></span><span class="dirty-note">待保存</span></button>
+  {% endfor %}
+</div>
+<p class="muted" style="margin:-10px 0 16px">
+  全部题型页签常驻，当前页会高亮；<b>基本设置</b>只管考试名称/总时长/交卷语。
+  每个题型页开头有「本场考试考…」开关，<b>带绿点的</b>才是这场要发给学生的题型。
+  选题修改后须先点底部「保存选题」，未保存时不能跨题型切换。
+</p>
+
+<style>
+.tab-btn{position:relative;padding:10px 18px;border:none;background:none;
+         cursor:pointer;font-size:.875rem;font-weight:500;color:var(--ink-2);
+         border-bottom:2px solid transparent;margin-bottom:-2px;min-height:42px;
+         transition:color var(--t),background var(--t),border-color var(--t);
+         font-family:inherit;border-radius:var(--r-xs) var(--r-xs) 0 0}
+.tab-btn:hover{color:var(--ink);background:var(--line-2)}
+.tab-btn.active{color:#fff;background:var(--brand);border-bottom-color:var(--brand);
+                font-weight:700;box-shadow:0 3px 10px rgba(59,130,246,.2)}
+/* 指示条入场：从中心展开（transform 动画，不顶动布局） */
+.tab-btn.active::after{content:"";position:absolute;left:10px;right:10px;
+       bottom:-2px;height:3px;background:var(--brand-d);border-radius:2px;
+       animation:tabIn .22s cubic-bezier(0,0,.2,1) both}
+@keyframes tabIn{from{transform:scaleX(.4);opacity:0}
+                 to{transform:scaleX(1);opacity:1}}
+.tab-btn .dot{display:none;width:8px;height:8px;border-radius:50%;
+              background:var(--green);margin-left:6px;vertical-align:middle;
+              box-shadow:0 0 0 2px var(--green-l)}
+.tab-btn.on .dot{display:inline-block;animation:fadeUp .2s ease both}
+.tab-btn .dirty-note{display:none;margin-left:6px;font-size:11px;font-weight:600}
+.tab-btn.dirty{color:var(--orange-d);box-shadow:inset 0 -3px var(--orange)}
+.tab-btn.active.dirty{color:#fff}
+.tab-btn.dirty .dirty-note{display:inline;color:var(--orange-d)}
+.tab-btn.active.dirty .dirty-note{color:#fff}
+.tab-panel{display:none}
+.tab-panel.active{display:block;animation:fadeUp .18s ease both}
+/* 题型开关（每个题型页开头）：整条可点，开启时描品牌色边 */
+.type-on{display:flex;align-items:center;gap:8px;padding:10px 14px;margin:0 0 14px;
+         border:1px solid var(--line);border-radius:var(--r-s);background:var(--line-2);
+         cursor:pointer;font-weight:600;
+         transition:border-color var(--t),background var(--t)}
+.type-on:hover{border-color:var(--brand-200);background:var(--brand-l)}
+.type-on input{width:18px;height:18px;min-width:18px;flex:none}
+.type-body{transition:opacity var(--t)}
+.type-body.off{display:none}   /* 没勾的题型：配置区直接藏起来，不灰显 */
+/* 已选题行和复选框保持原尺寸，不用缩小来表示“已选” */
+.qTable input[type=checkbox]{width:18px;height:18px;min-width:18px;margin:0;flex:none}
+.qTable tr.selected td{background:var(--green-l)}
+.qTable tr.selected td:first-child{box-shadow:inset 3px 0 var(--green)}
+tr.pending-remove td{text-decoration:line-through;background:var(--red-l)}
+.exam-scroll{overscroll-behavior:auto;scrollbar-gutter:stable}
+.exam-scroll:focus{outline:2px solid var(--brand);outline-offset:2px}
+.bottom-actions[hidden]{display:none!important}
+</style>
+
+<form method="post" enctype="multipart/form-data" id="examForm">
+<input type="hidden" name="_csrf" value="{{ csrf_token }}">
+<input type="hidden" name="tab" id="currentTab" value="{{ active }}">
+
+<!-- ========== 基本设置 ========== -->
+<div class="tab-panel active" id="tab-basic">
+<div class="card">
+  <h2>基本信息</h2>
+  <div class="row">
+    <label>考试名称</label>
+    <input type="text" name="title" value="{{ exam.title }}" style="width:300px">
+  </div>
+  <div class="row">
+    <label>考试总时长（分钟）</label>
+    <input type="number" name="duration" min="1" max="600" value="{{ exam.duration }}" style="width:100px">
+    <span class="muted"><b>理论题、实操题共用</b>这一个倒计时，从开考起算；文件名由学生端按题型自动生成。</span>
+  </div>
+  <div class="row">
+    <label style="cursor:pointer">
+      <input type="checkbox" name="require_complete" value="1" {% if exam.require_complete %}checked{% endif %}>
+      未做完禁止提交
+    </label>
+    <label style="cursor:pointer">
+      <input type="checkbox" name="passwordless" value="1" {% if exam.passwordless %}checked{% endif %}>
+      免密码考试（学生不填姓名/座位，按 IP 识别）
+    </label>
+  </div>
+  <div class="row" style="align-items:flex-start">
+    <label style="margin-top:8px">交卷结束语</label>
+    <textarea name="finish_note" rows="3" style="width:520px"
+              placeholder="学生点「交卷」后显示的话（做完、没做完都会显示）。例：考试结束，请安静等待老师收卷，祝你取得好成绩！">{{ exam.finish_note or '' }}</textarea>
+  </div>
+  <p class="muted" style="margin:-6px 0 10px 0">
+    学生在**任何页面**点「交卷」都会一次性提交全部内容；有没做完的会先列出来提醒，
+    勾了「未做完禁止提交」就直接拦住不给交。
+  </p>
+
+  <p class="muted" style="margin:0">
+    题型设置全都搬到上面的标签栏里了 —— 每个题型页开头有「本场考试考…」开关，
+    带绿点的才是这场要发给学生的题型；这里不再放题型勾选框。
+  </p>
+</div>
+
+<div class="card">
+  <h2>本场考试的题型</h2>
+  <p class="muted" style="margin-bottom:8px">
+    当前这场考：
+    <span id="typeSummary">
+    {% for k, l in type_tabs.items if k != 'basic' and k in sel_types %}
+      <span class="tag ok">{{ l }}</span>
+    {% else %}
+      <span class="muted">一个都没勾（学生端会没有题）</span>
+    {% endfor %}
+    </span>
+  </p>
+  <p class="muted" style="margin:0">
+    要增删就去对应题型的标签页里点开关，保存后生效；
+    <b>取消勾选不会删掉已经选好的题目</b>，重新勾上就能看到。
+  </p>
+</div>
+
+<div class="card">
+  <h2>本场学生名单</h2>
+  <p class="muted" style="margin-bottom:8px">
+    学生端登录时，<b>姓名必须在这个名单里</b>才让进考试（防止乱填名字、替别人考）。
+    一行一个学生，写法随意：<span class="mono">小明,01</span>、
+    <span class="mono">小红 02</span>、<span class="mono">小王|03</span>、只写
+    <span class="mono">小刚</span> 也行。<b>不配名单 = 不限制</b>（老考试照常）。
+    免密码考试支持 <span class="mono">姓名,座位,IP</span>，也可只填 IP。
+  </p>
+  <textarea id="rosterText" rows="6" style="width:100%;box-sizing:border-box;
+            font-family:inherit" placeholder="一行一个学生，例如：&#10;小明,01&#10;小红 02&#10;小王|03">{{ roster_text }}</textarea>
+  <div class="bar" style="margin:8px 0 0 0">
+    <button type="button" class="btn green sm" onclick="saveRoster('replace')">
+      保存名单（整份替换）</button>
+    <button type="button" class="btn sm" onclick="saveRoster('append')">
+      追加到现有名单</button>
+    <button type="button" class="btn ghost sm" onclick="clearRoster()">清空名单</button>
+    <span class="muted" id="rosterTip">
+      {% if roster %}当前 {{ roster|length }} 人{% else %}还没配名单（不限制）{% endif %}
+    </span>
+  </div>
+  {% if roster %}
+  <div style="margin-top:8px;background:#fff;border:1px solid var(--line);
+              border-radius:var(--r-s);padding:10px 12px" id="rosterList">
+    {% for r in roster %}
+    <span class="tag gray" style="margin:2px">{{ r.name }}
+      {% if r.seat %}<span class="muted">· {{ r.seat }}</span>{% endif %}
+      {% if r.ip %}<span class="muted">· {{ r.ip }}</span>{% endif %}
+      <a href="javascript:void(0)" style="margin-left:6px;color:var(--red)"
+         title="从名单里删掉" onclick="delRoster({{ r.id }})">✕</a></span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+var CSRF_R = '{{ csrf_token }}';
+function rosterPost(url, body, tip){
+  tip.textContent = '正在保存…';
+  fetch(url, {method: 'POST',
+              headers: {'Content-Type': 'application/json',
+                        'X-CSRF-Token': CSRF_R},
+              body: JSON.stringify(body || {})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d.ok){ tip.textContent = '失败：' + (d.msg || ''); return; }
+      tip.textContent = '已保存（' + (d.count || 0) + ' 人），学生端登录按新名单校验';
+      setTimeout(function(){ location.reload(); }, 600);
+    })
+    .catch(function(){ tip.textContent = '保存失败，请检查服务器'; });
+}
+function saveRoster(mode){
+  rosterPost('/exam/{{ exam.id }}/roster',
+             {text: document.getElementById('rosterText').value, mode: mode},
+             document.getElementById('rosterTip'));
+}
+function clearRoster(){
+  if(!confirm('确定清空本场名单？清空后学生端不再限制姓名。')) return;
+  rosterPost('/exam/{{ exam.id }}/roster/clear', {},
+             document.getElementById('rosterTip'));
+}
+function delRoster(rid){
+  rosterPost('/exam/{{ exam.id }}/roster/' + rid + '/delete', {},
+             document.getElementById('rosterTip'));
+}
+</script>
+
+<div class="card">
+  <h2>已选题目总览</h2>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
+    {% set ns = namespace(single_n=0, multi_n=0, judge_n=0, blank_n=0, code_n=0, drag_n=0) %}
+    {% for q in qs %}
+      {% if q.qtype == 'single' %}{% set ns.single_n = ns.single_n + 1 %}
+      {% elif q.qtype == 'multi' %}{% set ns.multi_n = ns.multi_n + 1 %}
+      {% elif q.qtype == 'judge' %}{% set ns.judge_n = ns.judge_n + 1 %}
+      {% elif q.qtype == 'blank' %}{% set ns.blank_n = ns.blank_n + 1 %}
+      {% elif q.qtype == 'code' %}{% set ns.code_n = ns.code_n + 1 %}
+      {% elif q.qtype == 'drag' %}{% set ns.drag_n = ns.drag_n + 1 %}
+      {% endif %}
+    {% endfor %}
+    {% for k, n in [('single', ns.single_n), ('multi', ns.multi_n),
+                    ('judge', ns.judge_n), ('blank', ns.blank_n),
+                    ('drag', ns.drag_n), ('code', ns.code_n)] %}
+      <div class="stat" style="min-width:100px"><div class="n">{{ n }}</div>
+        <div class="t">{{ dict(qtype_tabs).get(k, k) }}</div></div>
+    {% endfor %}
+    <div class="stat" style="min-width:100px"><div class="n">{{ tasks|length }}</div><div class="t">操作题</div></div>
+    <div class="stat" style="min-width:100px;border-top-color:var(--green)"><div class="n">{{ qs|length }}</div><div class="t">理论题合计</div></div>
+    <div class="stat" style="min-width:100px;border-top-color:var(--orange)"><div class="n">{{ qsum }}</div><div class="t">理论满分</div></div>
+  </div>
+  {% if qs %}
+  <div class="bar">
+    <button type="button" class="btn ghost sm"
+            onclick="submitMain('/exam/{{ exam.id }}/clearq', {}, '确定清空全部已选题目？')">
+      清空全部题目
+    </button>
+  </div>
+  {% endif %}
+</div>
+</div><!-- /tab-basic -->
+
+<!-- ========== 打字练习（小学）========== -->
+<div class="tab-panel{% if active == 'typing' %} active{% endif %}" id="tab-typing">
+<div class="card">
+  <label class="type-on">
+    <input type="checkbox" name="qtypes" value="typing" class="qtype-cb"
+           {% if show_typing %}checked{% endif %}>
+    本场考试考「打字练习（小学）」—— 只统计速度与正确率，不计分
+  </label>
+  <div class="type-body{% if not show_typing %} off{% endif %}" id="type-body-typing">
+    <div style="font-weight:600;margin-bottom:8px">打字练习设置（小学模块，只统计速度与正确率，不计分）</div>
+
+    {# 启用哪些子任务：每个都能单独开关（打地鼠 / 大写认键 / 小写找键 / 英文 / 中文 / 名字） #}
+    <div class="row" style="margin:0 0 10px;align-items:center">
+      <label class="muted" style="width:150px">考哪几个（可多选）</label>
+      {% for k, l in [('whack_mole','① 打地鼠（鼠标）'),('key_press','② 看键按键（大写）'),
+                      ('case_press','③ 小写字母找按键'),('typing_en','④ 英文打字'),
+                      ('typing_zh','⑤ 中文打字'),('name_typing','⑥ 打名字测试')] %}
+      <label style="border:1px solid var(--line);border-radius:var(--r-s);
+                    padding:5px 12px;cursor:pointer;background:#fff">
+        <input type="checkbox" name="typing_enable_{{ k }}" value="1"
+               class="typing-enable" data-task="{{ k }}"
+               {% if typing_cfg[k].enabled %}checked{% endif %}>
+        {{ l }}
+      </label>
+      {% endfor %}
+    </div>
+
+    <div class="row typing-cfg-row" data-task="whack_mole" style="margin:0 0 10px">
+      <label class="muted" style="width:150px">① 打地鼠（鼠标）</label>
+      难度
+      <select name="typing_whack_level" style="width:190px">
+        <option value="all" {% if typing_cfg.whack_mole.level == 'all' %}selected{% endif %}>
+          三关连打（简单→普通→困难）
+        </option>
+        <option value="easy" {% if typing_cfg.whack_mole.level == 'easy' %}selected{% endif %}>
+          只打简单关
+        </option>
+        <option value="normal" {% if typing_cfg.whack_mole.level == 'normal' %}selected{% endif %}>
+          只打普通关
+        </option>
+        <option value="hard" {% if typing_cfg.whack_mole.level == 'hard' %}selected{% endif %}>
+          只打困难关
+        </option>
+      </select>
+      每关冒出 <input type="text" name="typing_whack_rounds"
+                value="{{ typing_cfg.whack_mole.rounds }}" style="width:56px"> 只
+      洞口
+      <select name="typing_whack_grid" style="width:126px">
+        {% set g = typing_cfg.whack_mole.get('grid', '3x3') %}
+        <option value="3x3" {% if g == '3x3' %}selected{% endif %}>3×3（9 个洞）</option>
+        <option value="3x4" {% if g == '3x4' %}selected{% endif %}>3×4（12 个洞）</option>
+        <option value="4x4" {% if g == '4x4' %}selected{% endif %}>4×4（16 个洞）</option>
+        <option value="4x5" {% if g == '4x5' %}selected{% endif %}>4×5（20 个洞）</option>
+        <option value="5x5" {% if g == '5x5' %}selected{% endif %}>5×5（25 个洞）</option>
+      </select>
+      <span class="muted">（鼠标点击练习；档位越高地鼠越小、冒出时间越短：
+        简单 56px/1.8秒 → 普通 44px/1.3秒 → 困难 34px/0.9秒；洞口越多越难）</span>
+    </div>
+
+    <div class="row typing-cfg-row" data-task="key_press" style="margin:0 0 6px">
+      <label class="muted" style="width:150px">② 看键按键（大写）</label>
+      共 <input type="text" name="typing_key_rounds"
+                value="{{ typing_cfg.key_press.rounds }}" style="width:56px"> 轮，
+      每轮 <input type="text" name="typing_key_seconds"
+                 value="{{ typing_cfg.key_press.seconds }}" style="width:56px"> 秒
+      <span class="muted">（单个按键的停顿时长，填 0 = 不限时）</span>
+    </div>
+    <details class="typing-cfg-row" data-task="key_press" style="margin:0 0 10px 150px">
+      <summary style="cursor:pointer;color:var(--brand)">
+        点这里选择这场要考哪些键
+        <span class="muted" id="vk-count-key_press"></span>
+      </summary>
+      <div class="vk-panel" id="vk-key_press">
+        <div class="vk-row">
+          {% for k, l in typing_kb.func %}
+          <button type="button" class="vk" data-key="{{ k }}">{{ l }}</button>
+          {% endfor %}
+        </div>
+        <div class="vk-row">
+          {% for d in typing_kb.digits %}
+          <button type="button" class="vk" data-key="{{ d }}">{{ d }}</button>
+          {% endfor %}
+        </div>
+        {% for row in typing_kb.letters %}
+        <div class="vk-row">
+          {% for ch in row %}
+          <button type="button" class="vk" data-key="{{ ch }}">{{ ch }}</button>
+          {% endfor %}
+        </div>
+        {% endfor %}
+        <div class="vk-tools">
+          <button type="button" class="btn sm ghost" onclick="vkAll('key_press', true)">全选</button>
+          <button type="button" class="btn sm ghost" onclick="vkAll('key_press', false)">清空</button>
+          <span class="muted">没选 = 全部键都会随机出现</span>
+        </div>
+      </div>
+      <input type="hidden" name="typing_key_pool" id="vk-value-key_press"
+             value="{{ typing_cfg.key_press['keys'] | tojson }}">
+    </details>
+
+    <div class="row typing-cfg-row" data-task="case_press" style="margin:0 0 6px">
+      <label class="muted" style="width:150px">③ 小写字母找按键</label>
+      共 <input type="text" name="typing_case_rounds"
+                value="{{ typing_cfg.case_press.rounds }}" style="width:56px"> 轮，
+      每轮 <input type="text" name="typing_case_seconds"
+                 value="{{ typing_cfg.case_press.seconds }}" style="width:56px"> 秒
+      <span class="muted">（填 0 = 不限时）</span>
+    </div>
+    <details class="typing-cfg-row" data-task="case_press" style="margin:0 0 10px 150px">
+      <summary style="cursor:pointer;color:var(--brand)">
+        点这里选择这场要考哪些字母
+        <span class="muted" id="vk-count-case_press"></span>
+      </summary>
+      <div class="vk-panel" id="vk-case_press">
+        {% for row in typing_kb.letters %}
+        <div class="vk-row">
+          {% for ch in row %}
+          <button type="button" class="vk" data-key="{{ ch }}">{{ ch }}</button>
+          {% endfor %}
+        </div>
+        {% endfor %}
+        <div class="vk-tools">
+          <button type="button" class="btn sm ghost" onclick="vkAll('case_press', true)">全选</button>
+          <button type="button" class="btn sm ghost" onclick="vkAll('case_press', false)">清空</button>
+          <span class="muted">没选 = 26 个字母都会随机出现</span>
+        </div>
+      </div>
+      <input type="hidden" name="typing_case_pool" id="vk-value-case_press"
+             value="{{ typing_cfg.case_press['keys'] | tojson }}">
+    </details>
+
+    <div class="row typing-cfg-row" data-task="typing_en" style="margin:6px 0 4px">
+      <label class="muted" style="width:150px">④ 英文打字</label>
+      限时 <input type="text" name="typing_en_seconds"
+                 value="{{ typing_cfg.typing_en.seconds }}" style="width:64px"> 秒
+      <span class="muted">（填 0 = 不限时，打完或学生点「做完了」结束）</span>
+      <label class="muted" style="margin-left:14px">选课文</label>
+      <select id="enPreset" style="width:420px;max-width:48vw">
+        <option value="">—— 英文字母 / 单词 / 句子 / 短文 ——</option>
+        {% for p in typing_passages_en %}
+        <option value="{{ loop.index0 }}">[{{ p.grade }}·{{ p.kind }}] {{ p.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="crop-bar" data-for="typing_en_text">
+      截断：从第 <input type="text" class="crop-start" style="width:52px"> 个字符
+      到第 <input type="text" class="crop-end" style="width:52px"> 个字符
+      <button type="button" class="btn sm" onclick="cropText(this)">只取这一段</button>
+      <button type="button" class="btn sm ghost" onclick="cropReset(this)">还原</button>
+      <span class="muted">不填 = 到结尾；改完还能手动编辑</span>
+    </div>
+    <textarea name="typing_en_text" rows="3"
+              style="width:100%;box-sizing:border-box;margin:0 0 8px"
+              placeholder="英文范文（可上面选课文再截断，也可以自己粘贴）">{{ typing_cfg.typing_en.text }}</textarea>
+
+    <div class="row typing-cfg-row" data-task="typing_zh" style="margin:6px 0 4px">
+      <label class="muted" style="width:150px">⑤ 中文打字</label>
+      限时 <input type="text" name="typing_zh_seconds"
+                 value="{{ typing_cfg.typing_zh.seconds }}" style="width:64px"> 秒
+      <span class="muted">（填 0 = 不限时）</span>
+      <label class="muted" style="margin-left:14px">选课文</label>
+      <select id="zhPreset" style="width:420px;max-width:48vw">
+        <option value="">—— 生词 / 必背古诗 / 课文段落 ——</option>
+        {% for p in typing_passages %}
+        <option value="{{ loop.index0 }}">[{{ p.grade }}·{{ p.kind }}] {{ p.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="crop-bar" data-for="typing_zh_text">
+      截断：从第 <input type="text" class="crop-start" style="width:52px"> 个字符
+      到第 <input type="text" class="crop-end" style="width:52px"> 个字符
+      <button type="button" class="btn sm" onclick="cropText(this)">只取这一段</button>
+      <button type="button" class="btn sm ghost" onclick="cropReset(this)">还原</button>
+      <span class="muted">长课文可以只截一段给学生打</span>
+    </div>
+    <textarea name="typing_zh_text" rows="3"
+              style="width:100%;box-sizing:border-box"
+              placeholder="中文范文（可上面选课文再截断，也可以自己粘贴）">{{ typing_cfg.typing_zh.text }}</textarea>
+
+    {# ===== ⑤ 打名字测试：每个学生打自己的名字（系统自动认学生，不用老师录词表） ===== #}
+    <div class="row typing-cfg-row" data-task="name_typing" style="margin:10px 0 4px">
+      <label class="muted" style="width:150px">⑥ 打名字测试</label>
+      打 <input type="text" name="typing_name_rounds"
+               value="{{ typing_cfg.name_typing.rounds }}" style="width:56px"> 遍，
+      每遍限时 <input type="text" name="typing_name_seconds"
+                   value="{{ typing_cfg.name_typing.seconds }}" style="width:56px"> 秒
+      <span class="muted">（0 = 不限时；每遍 3 个回合：拼音提示 → 汉字提示 → 不给提示）</span>
+    </div>
+    <div class="typing-cfg-row" data-task="name_typing" style="margin:0 0 4px 150px">
+      <div class="muted" style="margin-bottom:6px">
+        不用老师录词表：<b>系统按学生机上填的姓名自动认出学生，每人打的就是他自己的名字</b>，
+        拼音提示也是自动生成的。
+      </div>
+      <div id="rosterBox" style="background:#fff;border:1px solid var(--line);border-radius:var(--r-s);
+                  padding:10px 12px">
+        {% if typing_roster.count %}
+        <div style="margin-bottom:6px">
+          本场已自动识别 <b>{{ typing_roster.count }}</b> 名学生：
+          {% for p in typing_roster.people %}
+          <span class="tag gray" style="margin:2px">{{ p.name }}
+            <span class="mono" style="font-size:11px">{{ p.pinyin }}</span></span>
+          {% endfor %}
+        </div>
+        {% if typing_roster.unknown %}
+        <div class="muted" style="color:var(--orange)">
+          ⚠ 拼音表没收录：{{ typing_roster.unknown|join('、') }}
+          —— 学生端会显示「拼音等老师标注」，不影响打名字。
+        </div>
+        {% endif %}
+        {% if typing_roster.duoyin %}
+        <div class="muted">
+          多音字姓名：{{ typing_roster.duoyin|join('、') }}（以学生本人读法为准）
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="muted">
+          还没识别到学生姓名 —— 学生机开机后填上自己的姓名（座位号），
+          这里就会自动出现，<b>不用老师手工录词表</b>。
+        </div>
+        {% endif %}
+        {% if typing_roster.unnamed %}
+        <div class="muted" style="margin-top:6px">
+          有 {{ typing_roster.unnamed }} 台机器还没填姓名，那些学生会先打备用词；
+          填上姓名后就打自己的名字。
+        </div>
+        {% endif %}
+      </div>
+      {# 拼音标注：拼音表没收录 / 多音字的姓名，老师在这里标一下就长期生效 #}
+      <div style="margin-top:8px">
+        <div class="muted" style="margin-bottom:4px">
+          拼音标注：一行一个「<b>字或词|拼音</b>」，例如 <span class="mono">可|kě</span>、
+          <span class="mono">乐乐|lè lè</span>。上面名单里带 ⚠ 的字在这里补一下，
+          <b>停一下手就自动保存</b>，学生端的拼音提示马上跟着变。
+        </div>
+        <textarea id="pinyinOverride" rows="3"
+                  style="width:100%;box-sizing:border-box;font-family:inherit"
+                  placeholder="可|kě">{{ pinyin_text }}</textarea>
+        <div class="muted" id="pinyinTip" style="margin-top:4px">
+          改动会自动保存并立即生效（对本系统所有考试都有效）
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .vk-panel{margin:8px 0 4px;padding:10px;background:#fff;border:1px solid var(--line);border-radius:var(--r-s)}
+      .vk-row{display:flex;gap:5px;margin-bottom:5px;flex-wrap:wrap}
+      .vk{min-width:34px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;
+          background:#fff;cursor:pointer;font-size:13px}
+      .vk:hover{border-color:var(--brand)}
+      .vk.on{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:700}
+      .vk-tools{display:flex;gap:8px;align-items:center;margin-top:6px}
+      .crop-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 4px 0}
+    </style>
+
+    <script>
+    /* ---------- 虚拟键盘：点选这场要考的键 ---------- */
+    var VK_INIT = {
+      key_press:  {{ typing_cfg.key_press['keys'] | tojson }},
+      case_press: {{ typing_cfg.case_press['keys'] | tojson }}
+    };
+    function vkSync(task){
+      var box = document.getElementById('vk-' + task);
+      var val = document.getElementById('vk-value-' + task);
+      var keys = [];
+      box.querySelectorAll('.vk.on').forEach(function(b){ keys.push(b.dataset.key); });
+      val.value = JSON.stringify(keys);
+      var c = document.getElementById('vk-count-' + task);
+      if(c) c.textContent = keys.length ? ('（已选 ' + keys.length + ' 个）') : '（全部）';
+    }
+    function vkAll(task, on){
+      document.querySelectorAll('#vk-' + task + ' .vk').forEach(function(b){
+        b.classList.toggle('on', on);
+      });
+      vkSync(task);
+    }
+    ['key_press','case_press'].forEach(function(task){
+      var box = document.getElementById('vk-' + task);
+      if(!box) return;
+      var sel = VK_INIT[task] || [];
+      box.querySelectorAll('.vk').forEach(function(b){
+        if(sel.indexOf(b.dataset.key) >= 0) b.classList.add('on');
+        b.addEventListener('click', function(){
+          this.classList.toggle('on');
+          vkSync(task);
+        });
+      });
+      vkSync(task);
+    });
+
+    /* ---------- 范文库：选一篇填进文本框 ---------- */
+    var ZH_PRESETS = {{ typing_passages | tojson }};
+    var EN_PRESETS = {{ typing_passages_en | tojson }};
+    function fillPreset(selId, presets, taName){
+      var sel = document.getElementById(selId);
+      if(!sel) return;
+      sel.addEventListener('change', function(){
+        if(this.value === '') return;
+        var p = presets[parseInt(this.value, 10)];
+        if(p && p.text){
+          document.querySelector('textarea[name="' + taName + '"]').value = p.text;
+        }
+        this.value = '';
+      });
+    }
+    fillPreset('zhPreset', ZH_PRESETS, 'typing_zh_text');
+    fillPreset('enPreset', EN_PRESETS, 'typing_en_text');
+
+    /* ---------- 截断：只取范文的某一段给学生打 ---------- */
+    function cropTarget(btn){
+      var bar = btn.closest('.crop-bar');
+      return document.querySelector('textarea[name="' + bar.dataset.for + '"]');
+    }
+    function cropText(btn){
+      var bar = btn.closest('.crop-bar');
+      var ta = cropTarget(btn);
+      if(!ta) return;
+      var txt = ta.value;
+      var s = parseInt(bar.querySelector('.crop-start').value, 10);
+      var e = parseInt(bar.querySelector('.crop-end').value, 10);
+      var a = isNaN(s) || s < 1 ? 1 : s;
+      var b = isNaN(e) || e < 1 || e > txt.length ? txt.length : e;
+      if(b < a){ var t = a; a = b; b = t; }
+      ta.value = txt.slice(a - 1, b);
+    }
+    /* 还原：把上次截断前的原文放回来（点「只取这一段」时先存一份） */
+    function cropReset(btn){
+      var ta = cropTarget(btn);
+      if(!ta) return;
+      if(ta.dataset.backup !== undefined){
+        ta.value = ta.dataset.backup;
+        delete ta.dataset.backup;
+      }
+    }
+    document.querySelectorAll('.crop-bar .crop-start').forEach(function(inp){
+      // 点截断前先备份原文，方便「还原」
+      inp.addEventListener('focus', function(){
+        var ta = document.querySelector('textarea[name="' + inp.closest('.crop-bar').dataset.for + '"]');
+        if(ta && ta.dataset.backup === undefined) ta.dataset.backup = ta.value;
+      });
+    });
+    </script>
+  </div><!-- /type-body -->
+</div><!-- /card -->
+</div><!-- /tab-typing -->
+
+<!-- ========== 画图题（画板创作 / 拼豆题） ========== -->
+<div class="tab-panel{% if active == 'drawing' %} active{% endif %}" id="tab-drawing">
+<div class="card">
+  <label class="type-on">
+    <input type="checkbox" name="qtypes" value="drawing" class="qtype-cb"
+           {% if show_drawing %}checked{% endif %}>
+    本场考试考画图题 —— 下面勾选考哪几种（可多选，各交一份作品）
+  </label>
+  <div class="type-body{% if not show_drawing %} off{% endif %}" id="type-body-drawing">
+    <div class="row" style="align-items:flex-start">
+      <label style="margin-top:8px">考哪几种</label>
+      <div style="flex:1;max-width:640px">
+        <label style="margin-right:20px">
+          <input type="checkbox" name="drawing_styles" value="draw"
+                 {% if 'draw' in drawing_cfg.styles %}checked{% endif %}>
+          画板创作（自由画：画笔 / 形状 / 元件，适合电路图、实验装置）
+        </label>
+        <label>
+          <input type="checkbox" name="drawing_styles" value="beads"
+                 {% if 'beads' in drawing_cfg.styles %}checked{% endif %}>
+          拼豆题（一格一粒彩豆拼图，内置小孩喜欢的素材图）
+        </label>
+        <div class="muted" style="margin-top:6px">
+          两种都勾 = 学生要做两道小题（画板、拼豆各交一份）；只勾一种就只考那种。
+          拼豆格子数：
+          <input type="number" name="drawing_grid" min="16" max="36"
+                 value="{{ drawing_cfg.grid or 28 }}" style="width:72px">
+          （16 ~ 36，勾了拼豆题才生效）
+        </div>
+      </div>
+    </div>
+    <div class="row" style="align-items:flex-start">
+      <label style="margin-top:8px">画题要求</label>
+      <div style="flex:1;max-width:640px">
+        <textarea name="drawing_brief" rows="4" style="width:100%"
+          placeholder="写给学生看的要求，例如：画一个「电阻和小灯泡串联」的电路图，标出电流方向。留空 = 自由创作。">{{ drawing_cfg.brief or '' }}</textarea>
+        <div class="muted" style="margin-top:6px">
+          画板创作内置：画笔 · 橡皮 · 直线/矩形/圆/三角形/箭头（数学形状）·
+          电学元件（电阻、灯泡、开关、电源、电流表…）·
+          网络元件（路由器、交换机、PC、服务器、防火墙…）·
+          化学仪器（烧杯、试管、锥形瓶、酒精灯、量筒…）。
+          拼豆题内置 18 色豆盘 + 小孩喜欢的素材图起稿。
+          学生完成后各导出一张压缩图片提交；图片较大的会排队上传。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /tab-drawing -->
+
+<!-- ========== 理论题型标签页（每种题型一个页面，全都显示）========== -->
+{% for type_key, type_label in qtype_tabs %}
+<div class="tab-panel{% if active == type_key %} active{% endif %}" id="tab-{{ type_key }}">
+<div class="card">
+  <label class="type-on">
+    <input type="checkbox" name="qtypes" value="{{ type_key }}" class="qtype-cb"
+           {% if type_key in sel_types %}checked{% endif %}>
+    本场考试考「{{ type_label }}」
+  </label>
+  <div class="type-body{% if type_key not in sel_types %} off{% endif %}"
+       id="type-body-{{ type_key }}">
+  <h2>{{ type_label }} — 已选题目</h2>
+  {% set type_qs = [] %}
+  {% for q in qs if q.qtype == type_key %}{% if type_qs.append(q) %}{% endif %}{% endfor %}
+  {% if type_qs %}
+  <table>
+    <tr><th style="width:44px">#</th><th>题干</th><th style="width:96px">分类</th>
+        <th style="width:48px">分值</th><th style="width:74px">操作</th></tr>
+    {% for q in type_qs %}
+    <tr>
+      <td class="muted">{{ loop.index }}</td>
+      <td>{{ q.stem[:80] }}{% if q.qtype=='code' %}<div class="mono muted" style="font-size:11px;margin-top:2px;background:var(--line-2);padding:3px 6px;border-radius:3px">{{ (q.code or '')[:60] }}</div>{% endif %}</td>
+      <td class="muted">{{ q.category or '-' }}</td>
+      <td>{{ q.score }}</td>
+      <td><button type="button" class="btn red sm"
+                  onclick="removeTypeQuestion('{{ type_key }}', {{ q.id }}, this)">移除</button></td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted" style="margin-top:8px">{{ type_qs|length }} 题，共 {{ type_qs|sum(attribute='score') }} 分</p>
+  {% else %}
+  <div class="empty">还没有{{ type_label }}，从下方题库添加。</div>
+  {% endif %}
+
+  <h2>从题库添加{{ type_label }}</h2>
+  <div class="filter">
+    <label>分类</label>
+    <select class="f-cat">
+      <option value="">全部分类</option>
+      {# 只列出**这个题型实际有题**的分类，免得选了个空分类什么都抽不到 #}
+      {% for c in cats_by_type.get(type_key, []) %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+    <button type="button" class="btn sm" onclick="toggleTypeAll('{{ type_key }}',true,this)">全选</button>
+    <button type="button" class="btn sm ghost" onclick="toggleTypeAll('{{ type_key }}',false,this)">取消</button>
+    <span class="tag info count-{{ type_key }}">已选 0 题</span>
+  </div>
+  <div class="scroll exam-scroll" tabindex="0" aria-label="{{ type_label }}题库，可滚动" style="max-height:380px">
+  <table class="qTable-{{ type_key }}">
+    <tr><th style="width:48px">选</th><th>题干</th><th style="width:96px">分类</th><th style="width:48px">分值</th></tr>
+    {% for q in allq if q.qtype == type_key %}
+    <tr data-cat="{{ q.category or '' }}" data-qid="{{ q.id }}"
+        class="{{ 'selected' if q.id in selected_qids else '' }}">
+      <td><input type="checkbox" name="qids" value="{{ q.id }}"
+                 {% if q.id in selected_qids %}checked{% endif %}
+                 onchange="onQuestionChange('{{ type_key }}', this)"></td>
+      <td title="{{ q.stem }}">{{ q.stem[:70] }}</td>
+      <td class="muted">{{ q.category or '-' }}</td>
+      <td>{{ q.score }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4"><div class="empty">题库中没有{{ type_label }}，请先去题库页面添加。</div></td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  <div class="bar">
+    <input type="text" id="n-{{ type_key }}" value="10" style="width:56px"
+           title="随机抽几题">
+    {# 随机抽题 / 全选会先保存当前待保存勾选，再立即写入，不会丢掉其他题型 #}
+    <button type="button" class="btn"
+            onclick="submitMain('/exam/{{ exam.id }}/random',
+                      {qtype:'{{ type_key }}', tab:'{{ type_key }}',
+                       selection_present:1, category: catOf(this),
+                       n: document.getElementById('n-{{ type_key }}').value})">
+      随机抽题（立即保存）
+    </button>
+    <button type="button" class="btn orange"
+            onclick="submitMain('/exam/{{ exam.id }}/addall',
+                      {qtype:'{{ type_key }}', tab:'{{ type_key }}',
+                       selection_present:1, category: catOf(this)})">
+      全选该题型（立即保存）
+    </button>
+    <span class="muted">修改勾选后请点页面底部「保存选题」；随机抽题和全选会立即保存。</span>
+  </div>
+  </div><!-- /type-body -->
+</div><!-- /card -->
+</div><!-- /tab-{{ type_key }} -->
+{% endfor %}
+
+<!-- ========== 操作题 ========== -->
+<div class="tab-panel{% if active == 'practice' %} active{% endif %}" id="tab-practice">
+<div class="card">
+  <label class="type-on">
+    <input type="checkbox" name="qtypes" value="practice" class="qtype-cb"
+           {% if show_practice %}checked{% endif %}>
+    本场考试考「操作题（WPS 文字 / 表格 / 演示）」
+  </label>
+  <div class="type-body{% if not show_practice %} off{% endif %}" id="type-body-practice">
+  <div class="row" style="margin:0 0 10px">
+    <label class="muted">操作题类型</label>
+    {% for k, l in [('word','WPS 文字'),('excel','WPS 表格'),('ppt','WPS 演示')] %}
+    <label style="border:1px solid var(--line);border-radius:var(--r-s);
+                  padding:6px 12px;cursor:pointer;background:#fff">
+      <input type="checkbox" name="practice_types" value="{{ k }}"
+             {% if k in practice_types %}checked{% endif %}>
+      {{ l }}
+    </label>
+    {% endfor %}
+    <p class="muted" style="margin:4px 0 0">
+      学生端按 Word / Excel / PPT 自动显示“座位号_姓名.docx / .xlsx / .pptx”，无需填写保存文件名。
+      从实操题库装入的任务可保留任务自身的文件名。
+    </p>
+  </div>
+</div><!-- /type-body -->
+</div><!-- /card -->
+
+<div class="card" style="background:var(--brand-l);border-color:var(--brand-200)">
+  <h2>从实操题库挑题（推荐）</h2>
+  <p class="muted" style="margin-bottom:10px">
+    题库里每套题都配好了素材、考试要求和评分规则，点一下就装进来。
+    <b>一场考试可以装多道操作题</b>，学生端会一道一道让你做。
+    有「<b>一级·入门</b>」的简单题，也有「二级」的进阶题。
+  </p>
+  <a class="btn green" href="/practice?to={{ exam.id }}">打开实操题库挑选（可加多道）</a>
+</div>
+
+{% if tasks %}
+<div class="card">
+  <h2>这场考试已装的操作题（{{ tasks|length }} 道）</h2>
+  <table>
+    <tr><th style="width:44px">#</th><th>题目</th><th style="width:70px">类型</th>
+        <th style="width:150px">素材</th><th style="width:74px">操作</th></tr>
+    {% for t in tasks %}
+    <tr>
+      <td class="muted">{{ loop.index }}</td>
+      <td>{{ t.name }}</td>
+      <td>{{ type_name.get(t.etype, t.etype) }}</td>
+      <td class="muted">{{ t.materials|join('、') }}</td>
+      <td>
+        <button type="button" class="btn red sm"
+                onclick="submitMain('/exam/{{ exam.id }}/deltask/{{ t.id }}', {},
+                        '把这套操作题从本场考试移除？')">移除</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted" style="margin-top:8px">
+    学生端会按上面的顺序逐道显示。每道题的素材和评分规则都是独立的。
+  </p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>操作题要求（显示在学生端）</h2>
+  <textarea name="requirement" rows="8" placeholder="1. 打开素材文件&#10;2. 按要求完成操作&#10;3. 保存并提交">{{ exam.requirement }}</textarea>
+</div>
+
+<div class="card">
+  <h2>素材文件</h2>
+  <div class="row">
+    <input type="file" name="material">
+    <span class="muted">上传后学生端可下载</span>
+  </div>
+  {% if exam.materials %}
+  <table>
+    <tr><th>文件名</th><th style="width:90px">操作</th></tr>
+    {% for m in json.loads(exam.materials) %}
+    <tr>
+      <td class="mono">{{ m }}</td>
+      <td><button type="button" class="btn red sm"
+                  onclick="submitMain('/exam/{{ exam.id }}/material/del/{{ m|urlencode }}', {},
+                          '删除素材文件「{{ m }}」？学生将无法下载')">删除</button></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="section-head">
+    <div>
+      <h2>评分规则</h2>
+      <p class="muted">每张卡片是一个评分点，可增删、排序，无需编写 JSON。</p>
+    </div>
+    <div class="bar" style="margin:0">
+      <span class="tag info" id="ruleTotal">总分 0</span>
+      <button class="btn ghost sm" type="button" id="addRule">＋ 添加评分点</button>
+    </div>
+  </div>
+  <input type="hidden" name="checks" id="checksData" value="[]">
+  <div id="ruleEditor" class="rule-editor"></div>
+  <div class="row" style="margin-top:16px">
+    <button class="btn orange" type="button"
+            onclick="submitWithFile('/exam/{{ exam.id }}/autorule',
+                     '用上传的标准答案覆盖当前规则？')">
+      用标准答案自动生成规则
+    </button>
+    <input type="file" name="answer" accept=".docx,.xlsx,.pptx">
+    <a class="btn ghost sm" href="/exam/{{ exam.id }}/rule">下载当前规则</a>
+  </div>
+</div>
+</div><!-- /tab-practice -->
+
+<!-- 底部统一保存：选题页只保存当前题型，其他设置页保存全部设置 -->
+{% set selection_tabs = qtype_tabs + [('practice', '实操')] %}
+{% set selection_active = active in selection_tabs | map(attribute=0) | list %}
+<div style="position:sticky;bottom:0;background:var(--bg);padding:12px 0;border-top:1px solid var(--line);z-index:10">
+  <div class="bar bottom-actions" id="selectionActions"{% if not selection_active %} hidden{% endif %}>
+    {% if exam.status in ('running', 'paused') %}
+    <button type="button" class="btn gray lg" disabled
+            title="考试进行中不能修改配置">保存选题（考试进行中已锁定）</button>
+    {% else %}
+    <button type="button" class="btn green lg" id="saveQuestionsBtn"
+            onclick="saveCurrentQuestions()">保存选题</button>
+    {% endif %}
+    <button type="button" class="btn gray lg" onclick="showTab('basic')">返回基本设置</button>
+    <span class="muted" id="selectionState">当前题型的勾选改动保存后才会生效</span>
+  </div>
+  <div class="bar bottom-actions" id="settingsActions"{% if selection_active %} hidden{% endif %}>
+    {% if exam.status in ('running', 'paused') %}
+    <span class="btn gray" style="cursor:not-allowed"
+          title="考试进行中不能修改配置">保存全部设置（考试进行中已锁定）</span>
+    {% else %}
+    <button class="btn green lg" type="submit">保存全部设置</button>
+    {% endif %}
+    <a class="btn gray" href="/">返回控制台</a>
+  </div>
+</div>
+
+</form>
+
+<script>
+(function () {
+  const TYPES = {{ rule_types | tojson }};
+  const TYPE_MAP = Object.fromEntries(TYPES.map(t => [t.value, t]));
+  const editor = document.getElementById('ruleEditor');
+  const hidden = document.getElementById('checksData');
+  const total = document.getElementById('ruleTotal');
+  let rules = {{ checks_list | tojson }};
+
+  const esc = value => String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  function valueOf(rule, field) {
+    if (field.key === 'cell_row') return (rule.expect?.cell || [])[0] ?? '';
+    if (field.key === 'cell_col') return (rule.expect?.cell || [])[1] ?? '';
+    if (field.key === 'cell_text') return (rule.expect?.cell || [])[2] ?? '';
+    const box = field.scope === 'rule' ? rule : (rule.expect || {});
+    const value = box[field.key];
+    if (Array.isArray(value)) return value.join(', ');
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+    return value == null ? '' : value;
+  }
+
+  function control(field, value) {
+    const common = `data-key="${esc(field.key)}" data-scope="${esc(field.scope)}"`;
+    if (field.kind === 'bool') {
+      return `<select ${common}><option value="">不要求</option><option value="true" ${value === 'true' ? 'selected' : ''}>是</option><option value="false" ${value === 'false' ? 'selected' : ''}>否</option></select>`;
+    }
+    if (field.kind === 'select') {
+      return `<select ${common}><option value="">请选择</option>${field.options.map(o => `<option value="${esc(o)}" ${String(value) === String(o) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    }
+    if (field.kind === 'textarea') {
+      return `<textarea ${common} rows="3" placeholder="请输入${esc(field.label)}">${esc(value)}</textarea>`;
+    }
+    return `<input ${common} type="${field.kind === 'number' ? 'number' : 'text'}" step="any" value="${esc(value)}" placeholder="请输入${esc(field.label)}">`;
+  }
+
+  function cardHtml(rule, index) {
+    const spec = TYPE_MAP[rule.type] || TYPES[0];
+    const fields = [...(spec.locators || []), ...(spec.fields || [])];
+    return `<article class="rule-card" data-index="${index}">
+      <div class="rule-card-head">
+        <span class="rule-no">${index + 1}</span>
+        <input class="rule-id" data-key="id" value="${esc(rule.id || `评分点${index + 1}`)}" aria-label="评分点名称">
+        <select class="rule-type" data-key="type" aria-label="评分类型">${TYPES.map(t => `<option value="${t.value}" ${t.value === rule.type ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select>
+        <span class="rule-app">${esc(spec.app || '')}</span>
+        <div class="rule-actions">
+          <button type="button" data-act="up" title="上移">↑</button>
+          <button type="button" data-act="down" title="下移">↓</button>
+          <button type="button" data-act="del" title="删除">×</button>
+        </div>
+      </div>
+      <div class="rule-grid">
+        <label class="field"><span>分值</span><input data-key="score" type="number" min="0" max="1000" step="0.1" value="${esc(rule.score ?? 0)}"></label>
+        <label class="field"><span>部分得分（可选）</span><input data-key="partial" type="number" min="0" step="0.1" value="${esc(rule.partial ?? '')}"></label>
+        ${fields.map(field => `<label class="field ${field.kind === 'textarea' ? 'wide' : ''}"><span>${esc(field.label)}</span>${control(field, valueOf(rule, field))}</label>`).join('')}
+      </div>
+    </article>`;
+  }
+
+  function parseValue(field, raw) {
+    if (field.kind === 'number') return raw === '' ? '' : Number(raw);
+    if (field.kind === 'list') return raw.split(/[,，\s]+/).map(v => v.trim()).filter(Boolean);
+    return raw;
+  }
+
+  function readCard(card) {
+    const type = card.querySelector('[data-key="type"]').value;
+    const spec = TYPE_MAP[type] || TYPES[0];
+    const rule = {
+      id: card.querySelector('[data-key="id"]').value.trim() || '评分点',
+      type,
+      score: Number(card.querySelector('[data-key="score"]').value || 0)
+    };
+    const partial = card.querySelector('[data-key="partial"]').value;
+    if (partial !== '') rule.partial = Number(partial);
+    for (const field of [...(spec.locators || []), ...(spec.fields || [])]) {
+      if (field.key.startsWith('cell_')) continue;
+      const el = card.querySelector(`[data-key="${field.key}"][data-scope="${field.scope}"]`);
+      if (!el) continue;
+      const value = parseValue(field, el.value);
+      if (value === '' || (Array.isArray(value) && !value.length)) continue;
+      if (field.scope === 'rule') rule[field.key] = value;
+      else (rule.expect ||= {})[field.key] = value;
+    }
+    if (type === 'table') {
+      const row = card.querySelector('[data-key="cell_row"]')?.value;
+      const col = card.querySelector('[data-key="cell_col"]')?.value;
+      const text = card.querySelector('[data-key="cell_text"]')?.value;
+      if (row !== '' || col !== '' || text !== '') {
+        (rule.expect ||= {}).cell = [Number(row || 0), Number(col || 0), text];
+      }
+    }
+    return rule;
+  }
+
+  function collect() {
+    rules = Array.from(editor.querySelectorAll('.rule-card')).map(readCard);
+    hidden.value = JSON.stringify(rules);
+    total.textContent = '总分 ' + rules.reduce((sum, r) => sum + Number(r.score || 0), 0).toFixed(1).replace(/\.0$/, '');
+  }
+
+  function render() {
+    editor.innerHTML = rules.length ? rules.map(cardHtml).join('') :
+      '<div class="empty-state">还没有评分点，点击“添加评分点”开始。</div>';
+    collect();
+  }
+
+  editor.addEventListener('input', collect);
+  editor.addEventListener('change', event => {
+    if (event.target.matches('.rule-type')) {
+      const card = event.target.closest('.rule-card');
+      rules[Number(card.dataset.index)] = readCard(card);
+      render();
+    } else {
+      collect();
+    }
+  });
+  editor.addEventListener('click', event => {
+    const button = event.target.closest('[data-act]');
+    if (!button) return;
+    const card = button.closest('.rule-card');
+    const index = Number(card.dataset.index);
+    collect();
+    if (button.dataset.act === 'del') rules.splice(index, 1);
+    if (button.dataset.act === 'up' && index > 0) [rules[index - 1], rules[index]] = [rules[index], rules[index - 1]];
+    if (button.dataset.act === 'down' && index < rules.length - 1) [rules[index + 1], rules[index]] = [rules[index], rules[index + 1]];
+    render();
+  });
+  document.getElementById('addRule').addEventListener('click', () => {
+    rules.push({ id: `评分点${rules.length + 1}`, type: 'font', score: 5, expect: {} });
+    render();
+  });
+  editor.closest('form').addEventListener('submit', collect);
+  render();
+})();
+</script>
+
+<script>
+/* ============================================================
+   提交助手
+   ⚠️ 以前这里用了 <form> 嵌套 <form>，那是无效 HTML：
+   浏览器会把外层表单提前闭合，导致
+     · 勾选的题目不在表单里 → 「保存选题」没反应
+     · 「随机抽题」提交到别的表单 → 页面乱跳
+   现在统一用这几个函数：字段还在主表单里，只改 action 再 submit。
+   ============================================================ */
+function submitMain(url, params, confirmMsg){
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  var f = document.getElementById('examForm');
+  // 清掉上一次动态加的隐藏字段
+  f.querySelectorAll('input[data-dyn]').forEach(function(e){ e.remove(); });
+  Object.keys(params || {}).forEach(function(k){
+    var i = document.createElement('input');
+    i.type = 'hidden'; i.name = k; i.value = params[k];
+    i.setAttribute('data-dyn', '1');
+    f.appendChild(i);
+  });
+  f.action = url;
+  f.submit();
+}
+
+function submitWithFile(url, confirmMsg){
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  var f = document.getElementById('examForm');
+  f.action = url;            // 主表单本身是 multipart，文件字段就在里面
+  f.submit();
+}
+
+/* 全部题型标签页（顺序和标签栏一一对应，不再藏起来） */
+var TABS = [{% for k, l in type_tabs.items %}'{{ k }}'{{ "," if not loop.last }}{% endfor %}];
+var THEORY_TABS = [{% for k, l in qtype_tabs %}'{{ k }}'{{ "," if not loop.last }}{% endfor %}];
+var SELECTION_TABS = THEORY_TABS.concat(['practice']);
+var DIRTY = {};
+
+function updateBottomActions(name){
+  var selection = document.getElementById('selectionActions');
+  var settings = document.getElementById('settingsActions');
+  var choosing = SELECTION_TABS.indexOf(name) >= 0;
+  if(selection) selection.hidden = !choosing;
+  if(settings) settings.hidden = choosing;
+  var tip = document.getElementById('selectionState');
+  if(tip){
+    tip.textContent = DIRTY[name] ? '有未保存的选题改动，请先点「保存选题」' :
+      '当前题型的勾选改动保存后才会生效';
+  }
+}
+
+function showTab(name){
+  if(TABS.indexOf(name) < 0) name = 'basic';    // 兜底：不认识就回基本设置
+  var ct = document.getElementById('currentTab');
+  var current = ct ? ct.value : 'basic';
+  if(name !== current && DIRTY[current]){
+    alert('「' + (TAB_LABEL[current] || current) + '」还有未保存的选题改动，请先点击底部「保存选题」。');
+    return;
+  }
+  document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active')});
+  document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active')});
+  var panel = document.getElementById('tab-'+name);
+  if(panel) panel.classList.add('active');
+  var btn = document.querySelector('.tab-btn[data-tab="' + name + '"]');
+  if(btn) btn.classList.add('active');
+  // 同步隐藏字段
+  if(ct) ct.value = name;
+  updateBottomActions(name);
+  // 更新 URL（不刷新页面）
+  try{ history.replaceState(null,'','?tab='+name); }catch(e){}
+}
+
+function markTypeDirty(type){
+  DIRTY[type] = true;
+  var btn = document.querySelector('.tab-btn[data-tab="' + type + '"]');
+  if(btn) btn.classList.add('dirty');
+  updateBottomActions(document.getElementById('currentTab').value);
+}
+
+function onQuestionChange(type, checkbox){
+  var row = checkbox.closest('tr');
+  if(row) row.classList.toggle('selected', checkbox.checked);
+  countType(type);
+  markTypeDirty(type);
+}
+
+function removeTypeQuestion(type, qid, button){
+  if(!confirm('把这题从本场考试移除？（题库里还在，点底部「保存选题」后生效）')) return;
+  var checkbox = document.querySelector('.qTable-' + type + ' input[value="' + qid + '"]');
+  if(checkbox){
+    checkbox.checked = false;
+    onQuestionChange(type, checkbox);
+  } else {
+    markTypeDirty(type);
+  }
+  var row = button.closest('tr');
+  if(row) row.classList.add('pending-remove');
+}
+
+function saveCurrentQuestions(){
+  var type = document.getElementById('currentTab').value;
+  if(type === 'practice'){
+    // 实操任务从题库装入时已即时保存；底部按钮保存本页的题型、要求和评分规则。
+    submitMain('/exam/{{ exam.id }}', {save_mode:'questions', tab:type});
+    return;
+  }
+  if(THEORY_TABS.indexOf(type) < 0) return;
+  submitMain('/exam/{{ exam.id }}/questions/' + type, {tab:type});
+}
+
+/* 题型开关：勾上 → 标签按钮亮绿点、页面内容恢复正常亮度；
+   取消勾选只是「这场不考」，题目和设置都留着 */
+function syncTypeSwitches(){
+  document.querySelectorAll('.qtype-cb').forEach(function(cb){
+    var key = cb.value;
+    var btn = document.querySelector('.tab-btn[data-tab="' + key + '"]');
+    if(btn) btn.classList.toggle('on', cb.checked);
+    var body = document.getElementById('type-body-' + key);
+    if(body) body.classList.toggle('off', !cb.checked);
+  });
+}
+document.querySelectorAll('.qtype-cb').forEach(function(cb){
+  cb.addEventListener('change', syncTypeSwitches);
+});
+syncTypeSwitches();
+
+/* ============================================================
+   勾选即存：题型开关 / 操作题类型 / 打字子任务，
+   点一下就自动保存，不用再按「保存全部设置」。
+   连续勾几个框只发一次请求（300ms 防抖）。
+   ============================================================ */
+var CSRF = '{{ csrf_token }}';      // fetch 走的不是表单，得自己带上
+var QUICK_TIMER = null;
+function quickTip(msg, bad){
+  var t = document.getElementById('quickTip');
+  if(!t) return;
+  t.textContent = msg;
+  t.style.background = bad ? '#c0392b' : 'var(--green)';
+  t.style.display = 'inline';
+  clearTimeout(quickTip._h);
+  quickTip._h = setTimeout(function(){ t.style.display = 'none'; }, 2200);
+}
+function quickSaveNow(){
+  var types = [];
+  document.querySelectorAll('.qtype-cb:checked').forEach(function(cb){
+    types.push(cb.value);
+  });
+  var pts = [];
+  document.querySelectorAll('input[name="practice_types"]:checked').forEach(function(cb){
+    pts.push(cb.value);
+  });
+  var en = {};
+  document.querySelectorAll('.typing-enable').forEach(function(cb){
+    en[cb.dataset.task] = cb.checked;
+  });
+  fetch('/exam/{{ exam.id }}/quickset', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF},
+    body: JSON.stringify({types: types, practice_types: pts, typing_enable: en})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.ok){
+      quickTip('✓ 已自动保存');
+      updateTypeSummary(d.types || []);     // 基本设置里的题型现状也跟着变
+    } else {
+      quickTip('保存失败：' + (d.msg || ''), true);
+    }
+  }).catch(function(){ quickTip('保存失败，请检查服务器', true); });
+}
+var TAB_LABEL = {
+  single: '单选题', multi: '多选题', judge: '判断题', blank: '填空题',
+  drag: '拖拽题', code: '程序填空', practice: '实操', typing: '打字', drawing: '画板'
+};
+function updateTypeSummary(types){
+  var box = document.getElementById('typeSummary');
+  if(!box) return;
+  if(!types.length){
+    box.innerHTML = '<span class="muted">一个都没勾（学生端会没有题）</span>';
+    return;
+  }
+  var html = '';
+  types.forEach(function(t){
+    if(TAB_LABEL[t]) html += '<span class="tag ok">' + TAB_LABEL[t] + '</span> ';
+  });
+  box.innerHTML = html;
+}
+function quickSave(){
+  clearTimeout(QUICK_TIMER);
+  QUICK_TIMER = setTimeout(quickSaveNow, 300);
+}
+document.querySelectorAll('.qtype-cb, .typing-enable, input[name="practice_types"]')
+  .forEach(function(cb){ cb.addEventListener('change', quickSave); });
+
+/* 随机抽题 / 全选该题型：带上当前选的分类（「全部分类」= 不限） */
+function catOf(btn){
+  var sel = btn.closest('.card').querySelector('.f-cat');
+  return sel ? sel.value : '';
+}
+
+/* ============================================================
+   姓名拼音标注（打名字测试）：停止输入 0.8 秒自动保存，
+   并就地刷新名单预览（不用整页刷新、不丢其他没保存的设置）。
+   ============================================================ */
+var PY_TIMER = null;
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function renderRoster(ros){
+  var box = document.getElementById('rosterBox');
+  if(!box) return;
+  var people = ros.people || [];
+  if(!people.length){
+    box.innerHTML = '<div class="muted">还没识别到学生姓名 —— 学生机开机后填上' +
+                    '自己的姓名（座位号），这里就会自动出现。</div>';
+    return;
+  }
+  var html = '<div style="margin-bottom:6px">本场已自动识别 <b>' + ros.count +
+             '</b> 名学生：';
+  people.forEach(function(p){
+    html += '<span class="tag gray" style="margin:2px">' + esc(p.name) +
+            ' <span class="mono" style="font-size:11px">' + esc(p.pinyin) +
+            '</span></span>';
+  });
+  html += '</div>';
+  if((ros.unknown || []).length){
+    html += '<div class="muted" style="color:var(--orange)">⚠ 拼音表没收录：' +
+            esc(ros.unknown.join('、')) + ' —— 在下面「拼音标注」里补一下就行。</div>';
+  }
+  if((ros.duoyin || []).length){
+    html += '<div class="muted">多音字姓名：' + esc(ros.duoyin.join('、')) +
+            '（以学生本人读法为准）</div>';
+  }
+  if(ros.unnamed){
+    html += '<div class="muted" style="margin-top:6px">有 ' + ros.unnamed +
+            ' 台机器还没填姓名，那些学生会先打备用词。</div>';
+  }
+  box.innerHTML = html;
+}
+function savePinyin(){
+  var ta = document.getElementById('pinyinOverride');
+  var tip = document.getElementById('pinyinTip');
+  if(!ta || !tip) return;
+  tip.textContent = '正在保存…';
+  fetch('/exam/{{ exam.id }}/pinyin', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': CSRF},
+    body: JSON.stringify({text: ta.value})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(!d.ok){ tip.textContent = '保存失败：' + (d.msg || ''); return; }
+    tip.textContent = '已保存（' + (d.count || 0) + ' 条标注），名单已按新读音刷新';
+    renderRoster(d.roster || {});
+  }).catch(function(){ tip.textContent = '保存失败，请检查服务器'; });
+}
+(function(){
+  var ta = document.getElementById('pinyinOverride');
+  if(!ta) return;
+  ta.addEventListener('input', function(){
+    clearTimeout(PY_TIMER);
+    PY_TIMER = setTimeout(savePinyin, 800);
+  });
+})();
+
+/* 打字子任务没勾的，对应配置行灰掉（配置还在，只是这场不考） */
+function syncTypingRows(){
+  document.querySelectorAll('.typing-enable').forEach(function(cb){
+    // 一个子任务可能有好几行（配置行 + 展开面板），没勾的全部隐藏而不是灰显
+    document.querySelectorAll('.typing-cfg-row[data-task="' + cb.dataset.task + '"]')
+      .forEach(function(row){
+        row.style.display = cb.checked ? '' : 'none';
+      });
+  });
+}
+document.querySelectorAll('.typing-enable').forEach(function(cb){
+  cb.addEventListener('change', syncTypingRows);
+});
+syncTypingRows();
+
+function countType(type){
+  var n = document.querySelectorAll('.qTable-'+type+' input[type=checkbox]:checked').length;
+  var el = document.querySelector('.count-'+type);
+  if(el) el.textContent = '已选 '+n+' 题';
+}
+
+function toggleTypeAll(type, on){
+  var changed = false;
+  document.querySelectorAll('.qTable-'+type+' tr[data-cat]').forEach(function(r){
+    if(r.style.display==='none') return;
+    var cb = r.querySelector('input[type=checkbox]');
+    if(cb && cb.checked !== on){
+      cb.checked = on;
+      r.classList.toggle('selected', on);
+      changed = true;
+    }
+  });
+  countType(type);
+  if(changed) markTypeDirty(type);
+}
+
+/* 分类筛选 */
+document.querySelectorAll('.f-cat').forEach(function(sel){
+  sel.addEventListener('change', function(){
+    var cat = this.value;
+    var table = this.closest('.card').querySelector('table');
+    if(!table) return;
+    table.querySelectorAll('tr[data-cat]').forEach(function(r){
+      r.style.display = (!cat || r.dataset.cat===cat) ? '' : 'none';
+    });
+  });
+});
+/* 嵌套滚动：鼠标位于容器内（hover）或容器获得焦点时，先滚容器；
+   到达边界后不拦截事件，页面照常滚动，避免 nested scroll 卡死。 */
+function enableExamScrollWheel(){
+  document.querySelectorAll('.exam-scroll').forEach(function(box){
+    box.addEventListener('wheel', function(event){
+      if(event.defaultPrevented || event.ctrlKey) return;
+      var unit = event.deltaMode === 1 ? 16 :
+                 (event.deltaMode === 2 ? box.clientHeight : 1);
+      var dy = (event.deltaY || 0) * unit;
+      var dx = (event.deltaX || 0) * unit;
+      var horizontal = event.shiftKey || (Math.abs(dx) > Math.abs(dy) && dx !== 0);
+      var delta = horizontal ? dx : dy;
+      if(!delta) return;
+      var pos = horizontal ? box.scrollLeft : box.scrollTop;
+      var max = horizontal ? (box.scrollWidth - box.clientWidth) :
+                            (box.scrollHeight - box.clientHeight);
+      if(max <= 1) return;                 // 没有可滚空间 → 交回页面
+      var canScroll = delta > 0 ? pos < max - 1 : pos > 1;
+      if(!canScroll) return;               // 已到边界 → 让外层页面继续滚
+      event.preventDefault();
+      event.stopPropagation();
+      if(horizontal) box.scrollLeft += delta;
+      else box.scrollTop += delta;
+    }, {passive:false});
+  });
+}
+
+/* 页面加载时自动切到指定标签页 */
+document.addEventListener('DOMContentLoaded', function(){
+  var tab = '{{ active_tab or "" }}';
+  if(tab) showTab(tab);
+  THEORY_TABS.forEach(countType);
+  updateBottomActions(document.getElementById('currentTab').value);
+  enableExamScrollWheel();
+});
+</script>
+
+{% endblock %}

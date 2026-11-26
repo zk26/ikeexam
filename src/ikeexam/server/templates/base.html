@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}ikee考务中心{% endblock %}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Ctext x='16' y='22' font-size='16' font-weight='bold' text-anchor='middle' fill='%23fff' font-family='sans-serif'%3E%E8%80%83%3C/text%3E%3C/svg%3E">
+<style>
+/* ============================================================
+   Design System — ikee考务中心
+   Based on UI/UX Pro Max guidelines:
+   - 8px spacing grid
+   - 16px base font, 1.5 line-height
+   - 4.5:1 contrast ratio
+   - 44px touch targets
+   - Semantic color tokens
+   ============================================================ */
+:root{
+  /* Brand
+     ⚠️ 语义色是"当按钮底 / 当文字色"两用的，必须按 WCAG AA 校：
+        白字压在 #3b82f6 上只有 3.68:1、#16a34a 上 3.3:1、#ea580c 上 3.56:1，
+        全都达不到正文 4.5:1 —— 按钮字看着发虚。现在统一压深：
+        #2563eb 白字 5.17:1   #15803d 白字 5.02:1   #c2410c 白字 5.18:1
+        浅色底（--brand-l / --green-l ...）不变，标签配色不受影响。 */
+  --brand:#2563eb;        --brand-d:#1d4ed8;   --brand-l:#eff6ff;
+  --brand-50:#eff6ff;     --brand-100:#dbeafe;  --brand-200:#bfdbfe;
+  --brand-600:#2563eb;    --brand-700:#1d4ed8;  --brand-900:#1e3a5f;
+  /* Semantic */
+  --green:#15803d;        --green-l:#f0fdf4;    --green-d:#166534;
+  --red:#dc2626;          --red-l:#fef2f2;      --red-d:#b91c1c;
+  --orange:#c2410c;       --orange-l:#fff7ed;   --orange-d:#9a3412;
+  --amber:#b45309;        --amber-l:#fffbeb;
+  /* Neutral
+     ⚠️ --ink-3 以前是 #94a3b8，白底上只有 2.6:1 —— 弱化文字也是正文，
+        必须满足 4.5:1。#64748b 白底 4.76:1，浅灰底（--line-2）4.4:1。
+        #94a3b8 保留在 --ink-3-dim，只用于纯装饰（分隔线旁的小圆点等）。 */
+  --ink:#0f172a;          --ink-2:#475569;      --ink-3:#5f6b7d;
+  --ink-3-dim:#94a3b8;    --ink-4:#cbd5e1;      --ink-5:#e2e8f0;
+  --line:#e2e8f0;         --line-2:#f1f5f9;
+  --bg:#f8fafc;           --card:#fff;
+  /* 辅助点缀（教育感）：进度/图示/徽章用，不与主色抢戏 */
+  --teal:#0d9488;         --teal-l:#f0fdfa;
+  /* Effects */
+  --t:.16s ease;          /* 统一微交互时长（150-200ms 档） */
+  --r:12px;  --r-s:8px;   --r-xs:6px;
+  --sh-sm:0 1px 2px rgba(0,0,0,.05);
+  --sh:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
+  --sh-md:0 4px 6px -1px rgba(0,0,0,.07),0 2px 4px -2px rgba(0,0,0,.05);
+  --sh-lg:0 10px 15px -3px rgba(0,0,0,.08),0 4px 6px -4px rgba(0,0,0,.04);
+  /* 间距刻度：4/8 节奏（后台面板按"密集仪表盘"档：8~32px） */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px;
+  --sp-5:24px; --sp-6:32px;
+  /* Typography */
+  --font:"Inter","Microsoft YaHei","PingFang SC","Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono","Fira Code","Consolas","Courier New",monospace;
+}
+
+/* ============================================================
+   可访问性基线
+   ============================================================ */
+/* 键盘焦点：所有可交互元素都要有可见焦点环（WCAG 2.4.7 / 2.4.11）。
+   原来只有 .btn 有焦点样式，链接/输入框/标签页用键盘 Tab 过去看不见光标。 */
+:where(a,button,[role=button],input,select,textarea,summary):focus-visible{
+  outline:2px solid var(--brand-d);outline-offset:2px;border-radius:var(--r-xs)}
+.nav a:focus-visible{outline-offset:-3px}    /* 导航条内不越界 */
+.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+/* 屏幕阅读器专用文字（图表的文字替代、纯图标的无障碍名称） */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+     overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+/* 内联图标：跟随文字颜色，与文字基线对齐 */
+.ic{flex-shrink:0;vertical-align:-2px}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{font-family:var(--font);background:var(--bg);color:var(--ink);
+     font-size:.875rem;line-height:1.6;padding:0}
+a{color:var(--brand);text-decoration:none;transition:color .15s}
+a:hover{color:var(--brand-d)}
+
+/* ============================================================
+   Navigation
+   ============================================================ */
+.nav{background:#fff;border-bottom:1px solid var(--line);
+     padding:0 24px;display:flex;align-items:center;height:56px;
+     position:sticky;top:0;z-index:100;
+     box-shadow:var(--sh-sm)}
+.nav a{color:var(--ink-2);padding:0 14px;line-height:56px;
+       display:inline-block;font-size:.8125rem;font-weight:500;
+       transition:.15s;border-bottom:2px solid transparent;
+       border-radius:var(--r-xs) var(--r-xs) 0 0}
+.nav a:hover{color:var(--ink);background:var(--line-2);text-decoration:none}
+.nav a.on{color:var(--brand);border-bottom-color:var(--brand);background:var(--brand-l);
+          font-weight:600}
+.nav .brand{color:var(--brand);font-weight:700;font-size:1rem;margin-right:20px;
+            letter-spacing:.3px;display:flex;align-items:center;gap:8px}
+.nav .brand::before{content:"考";display:inline-flex;align-items:center;justify-content:center;
+     width:28px;height:28px;border-radius:var(--r-xs);
+     background:var(--brand);color:#fff;font-size:.75rem;font-weight:700}
+.nav .spacer{flex:1}
+.nav .warnbtn{color:var(--amber)}
+.nav .warnbtn:hover{background:var(--amber-l);color:var(--orange-d)}
+/* 默认密码提醒：一个小圆点，不拉长导航文字 */
+.nav .dot{display:inline-block;width:6px;height:6px;border-radius:50%;
+     background:var(--amber);margin-left:6px;vertical-align:middle;
+     box-shadow:0 0 0 2px var(--amber-l)}
+.nav .outbtn{color:var(--ink-3);background:none;border:0;font:inherit;cursor:pointer;
+             padding:0 14px;line-height:56px;display:inline-block;font-size:.8125rem;
+             font-weight:500;transition:.15s;border-bottom:2px solid transparent;
+             border-radius:var(--r-xs) var(--r-xs) 0 0}
+.nav .outbtn:hover{background:var(--red-l);color:var(--red)}
+
+/* ============================================================
+   Layout
+   ============================================================ */
+.wrap{max-width:1280px;margin:0 auto;padding:24px 24px}
+.card{background:var(--card);border-radius:var(--r);padding:24px;
+      margin-bottom:20px;border:1px solid var(--line);
+      box-shadow:var(--sh-sm);transition:box-shadow .2s}
+.card:hover{box-shadow:var(--sh)}
+h1{font-size:1.25rem;margin-bottom:16px;font-weight:700;color:var(--ink);
+   display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h2{font-size:.9375rem;margin:24px 0 12px;color:var(--ink);font-weight:600;
+   display:flex;align-items:center;gap:8px}
+h2:first-child{margin-top:0}
+h2::before{content:"";width:3px;height:14px;background:var(--brand);border-radius:2px}
+h3{font-size:.875rem;margin:16px 0 8px;color:var(--ink-2);font-weight:600}
+
+/* ============================================================
+   Tables
+   ============================================================ */
+table{width:100%;border-collapse:separate;border-spacing:0;
+      border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+th,td{border-bottom:1px solid var(--line);padding:10px 14px;text-align:left;font-size:.8125rem}
+th{background:var(--line-2);font-weight:600;color:var(--ink-2);
+   border-bottom:1px solid var(--line);white-space:nowrap;font-size:.75rem;
+   letter-spacing:.4px}
+tr:last-child td{border-bottom:none}
+.score-table thead th{position:sticky;top:56px;z-index:5;background:var(--line-2);
+                      box-shadow:0 1px 0 var(--line)}
+/* 行悬停高亮。
+   ⚠️ 原来写的是 tbody tr:hover —— 但模板里的 <tr> 大多直接挂在 <table> 下，
+      没有 <tbody>，浏览器不会给它们套 tbody 选择器，所以 14 张表里只有
+      index.html 那唯一一张带 <tbody> 的表有悬停反馈。 */
+table tr{transition:background .15s}
+table tr:hover{background:var(--brand-50)}
+/* 表格在窄屏（平板/小窗口）横向滚动，而不是撑破卡片布局 */
+@media (max-width:900px){
+  .card{overflow-x:auto}
+  .card table{min-width:max-content}
+}
+td.mono,.mono{font-family:var(--mono);font-size:.75rem}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+     padding:8px 16px;background:var(--brand);color:#fff;border:none;
+     border-radius:var(--r-s);cursor:pointer;font-size:.8125rem;
+     font-weight:500;margin:2px;font-family:inherit;
+     transition:background var(--t),box-shadow var(--t),transform .1s ease;
+     white-space:nowrap;line-height:1.4;
+     min-height:36px}
+.btn:hover{background:var(--brand-d);text-decoration:none;color:#fff;
+           box-shadow:var(--sh-md)}
+.btn:active{transform:scale(.97)}
+.btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.btn.green{background:var(--green)}  .btn.green:hover{background:var(--green-d);
+            box-shadow:0 4px 6px -1px rgba(22,163,74,.2)}
+.btn.red{background:var(--red)}      .btn.red:hover{background:var(--red-d);
+            box-shadow:0 4px 6px -1px rgba(220,38,38,.2)}
+.btn.gray{background:var(--ink-4);color:var(--ink-2)}
+.btn.gray:hover{background:var(--ink-3);color:#fff}
+.btn.orange{background:var(--orange)}.btn.orange:hover{background:var(--orange-d);
+            box-shadow:0 4px 6px -1px rgba(234,88,12,.2)}
+.btn.ghost{background:#fff;color:var(--ink-2);border:1px solid var(--line)}
+.btn.ghost:hover{background:var(--line-2);color:var(--ink);box-shadow:none}
+/* 表格行内的小按钮要有够大的点按区域（原来 28px 偏小，容易点错行） */
+.btn.sm{padding:6px 12px;font-size:.75rem;min-height:32px}
+.btn.lg{padding:12px 24px;font-size:.9375rem;min-height:44px}
+.btn[disabled]{opacity:.5;cursor:not-allowed;pointer-events:none}
+
+/* ============================================================
+   Forms
+   ============================================================ */
+input,select,textarea{padding:8px 12px;border:1px solid var(--ink-4);
+     border-radius:var(--r-s);font-size:.8125rem;font-family:inherit;
+     color:var(--ink);background:#fff;transition:.15s;outline:none;
+     min-height:36px}
+input:focus,select:focus,textarea:focus{border-color:var(--brand);
+     box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+input[type=text]{min-width:180px}
+input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand);cursor:pointer}
+textarea{width:100%;min-height:100px;font-family:var(--mono);font-size:.75rem;
+     line-height:1.6;resize:vertical;padding:12px}
+label{display:inline-flex;align-items:center;gap:6px;margin-right:8px;
+      color:var(--ink-2);font-size:.8125rem;font-weight:500}
+.row{margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.field{display:flex;flex-direction:column;gap:6px;margin:0;min-width:0}
+.field>span{font-size:.75rem;font-weight:600;color:var(--ink-2)}
+.field.wide{grid-column:1/-1}
+.section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.section-head h2{margin:0 0 4px}
+.section-head p{margin:0}
+.rule-editor{display:flex;flex-direction:column;gap:12px;margin-top:16px}
+.rule-card{border:1px solid var(--line);border-radius:var(--r);background:var(--card);
+           box-shadow:var(--sh-sm);overflow:hidden}
+.rule-card-head{display:flex;align-items:center;gap:8px;padding:10px 12px;
+                background:var(--line-2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.rule-no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;
+         border-radius:50%;background:var(--brand);color:#fff;font-size:.75rem;font-weight:700}
+.rule-id{min-width:140px!important;flex:1;font-weight:600}
+.rule-type{min-width:150px!important}
+.rule-app{font-size:.6875rem;color:var(--ink-3);background:#fff;border:1px solid var(--line);
+          border-radius:20px;padding:2px 8px;white-space:nowrap}
+.rule-actions{display:flex;gap:4px;margin-left:auto}
+.rule-actions button{width:30px;height:30px;border:1px solid var(--line);background:#fff;
+                     color:var(--ink-2);border-radius:var(--r-xs);cursor:pointer;font-size:.875rem}
+.rule-actions button:hover{background:var(--brand-l);color:var(--brand);border-color:var(--brand-200)}
+.rule-actions button[data-act="del"]:hover{background:var(--red-l);color:var(--red);border-color:#fecaca}
+.rule-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px;padding:14px 16px}
+.empty-state{padding:28px;text-align:center;color:var(--ink-3);background:var(--line-2);
+             border:1px dashed var(--ink-4);border-radius:var(--r)}
+@media(max-width:720px){.form-grid,.rule-grid{grid-template-columns:1fr}}
+
+/* ============================================================
+   Components
+   ============================================================ */
+/* 页内标签页导航：hover/当前项都有过渡，当前项用色块+底线双重标记 */
+.tabbar{display:flex;gap:4px;border-bottom:2px solid var(--line);margin-bottom:16px;
+        flex-wrap:wrap}
+.tbtn{padding:10px 18px;border:none;background:none;cursor:pointer;
+      font-size:.875rem;font-weight:500;color:var(--ink-2);
+      border-bottom:2px solid transparent;margin-bottom:-2px;
+      transition:color var(--t),background var(--t),border-color var(--t);
+      font-family:inherit;border-radius:var(--r-xs) var(--r-xs) 0 0}
+.tbtn:hover{color:var(--ink);background:var(--line-2)}
+.tbtn.on{color:var(--brand);border-bottom-color:var(--brand);
+         font-weight:600;background:var(--brand-l)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
+/* 统计卡片是纯展示（不可点），所以不做位移/上浮 —— 
+   给不可交互的东西加悬停位移会误导点击，也会造成视觉抖动 */
+.stat{background:#fff;border-radius:var(--r);padding:20px 16px;text-align:center;
+      border:1px solid var(--line);box-shadow:var(--sh-sm);
+      transition:box-shadow .2s}
+.stat:hover{box-shadow:var(--sh-md)}
+.stat .n{font-size:1.75rem;font-weight:700;color:var(--brand-600);line-height:1.2}
+.stat .t{font-size:.75rem;color:var(--ink-3);margin-top:4px;font-weight:500}
+
+.tag{display:inline-flex;align-items:center;padding:2px 10px;border-radius:20px;
+     font-size:.6875rem;font-weight:600;line-height:1.6;white-space:nowrap;
+     letter-spacing:.3px;border:1px solid transparent}
+.tag.ok{background:var(--green-l);color:var(--green-d);border-color:#bbf7d0}
+.tag.no{background:var(--red-l);color:var(--red-d);border-color:#fecaca}
+.tag.warn{background:var(--amber-l);color:var(--orange-d);border-color:#fde68a}
+.tag.info{background:var(--brand-l);color:var(--brand-700);border-color:var(--brand-200)}
+.tag.gray{background:var(--line-2);color:var(--ink-3);border-color:var(--line)}
+/* 考试编号：等宽字体，一眼能读，别和数据混在一起 */
+.tag.code{background:var(--line-2);color:var(--ink-2);
+          font-family:ui-monospace,Consolas,"Courier New",monospace;
+          letter-spacing:0;font-weight:500}
+
+.flash{padding:12px 16px;border-radius:var(--r-s);margin-bottom:16px;
+       background:var(--green-l);color:var(--green-d);font-size:.8125rem;
+       border:1px solid #bbf7d0;border-left:4px solid var(--green);
+       font-weight:500;animation:fadeUp .24s ease both;
+       transition:opacity .18s ease}
+.flash.err{background:var(--red-l);color:var(--red-d);border-color:#fecaca;
+           border-left-color:var(--red)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(-4px)}
+                  to{opacity:1;transform:none}}
+
+.muted{color:var(--ink-3);font-size:.75rem}
+.big{font-size:.9375rem;font-weight:600}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}
+.filter{background:var(--line-2);border-radius:var(--r);padding:14px 16px;
+        margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+        border:1px solid var(--line)}
+.qitem{border:1px solid var(--line);border-radius:var(--r-s);padding:14px;
+       margin-bottom:10px;background:#fcfdff;transition:box-shadow .15s}
+.qitem:hover{box-shadow:var(--sh)}
+.qitem .stem{font-weight:600;margin-bottom:6px;font-size:.875rem}
+.qitem .opts{color:var(--ink-2);font-size:.8125rem}
+.empty{text-align:center;padding:40px 20px;color:var(--ink-3);font-size:.875rem;
+       background:var(--line-2);border-radius:var(--r);border:1px dashed var(--ink-4)}
+.scroll{max-height:430px;overflow:auto;border:1px solid var(--line);
+        border-radius:var(--r)}
+pre{background:#1e293b;color:#e2e8f0;padding:16px;border-radius:var(--r-s);
+    overflow:auto;font-size:.8125rem;font-family:var(--mono);line-height:1.6}
+code{font-family:var(--mono);background:var(--line-2);padding:2px 6px;
+     border-radius:4px;font-size:.75rem;color:var(--brand-700)}
+
+.step{display:flex;gap:12px;margin-bottom:10px;align-items:center;
+      padding:12px 16px;background:var(--line-2);border-radius:var(--r-s);
+      border:1px solid var(--line)}
+.step .n{width:28px;height:28px;border-radius:50%;background:var(--ink-4);color:#fff;
+    text-align:center;line-height:28px;font-size:.75rem;flex-shrink:0;font-weight:700}
+.step .n.ok{background:var(--green)}
+.online::before{content:"";display:inline-block;width:8px;height:8px;
+    border-radius:50%;background:var(--green);margin-right:6px}
+.offline::before{content:"";display:inline-block;width:8px;height:8px;
+    border-radius:50%;background:var(--ink-4);margin-right:6px}
+
+/* 严重度圆点：用设计令牌上色（emoji 圆点颜色不受控、不同系统还不一样） */
+.sev{display:inline-block;width:9px;height:9px;border-radius:50%;
+     vertical-align:middle;margin-right:6px;flex-shrink:0}
+.sev.red{background:var(--red)}
+.sev.amber{background:var(--amber)}
+.sev.green{background:var(--green)}
+
+/* Info blocks */
+.note{background:var(--brand-l);border-left:3px solid var(--brand);
+      padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;
+      font-size:.8125rem;color:var(--brand-700);margin:12px 0}
+.note.warn{background:var(--orange-l);border-left-color:var(--orange);color:var(--orange-d)}
+.note b{font-weight:700}
+ul.tips{margin:8px 0 8px 20px;font-size:.8125rem;color:var(--ink-2);line-height:1.9}
+
+/* ============================================================
+   Charts (ECharts)
+   ============================================================ */
+/* minmax(min(420px,100%),1fr)：窗口比 420px 还窄时用 100%，
+   否则固定 420px 会把页面撑出横向滚动条（375px 屏幕上必现） */
+.charts{display:grid;gap:20px;
+        grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr))}
+.chart{background:#fff;border:1px solid var(--line);border-radius:var(--r);
+       padding:16px 18px;box-shadow:var(--sh-sm)}
+.chart h3{margin:0 0 10px;font-size:.875rem;color:var(--ink);font-weight:600;
+          display:flex;align-items:center;justify-content:space-between;gap:8px}
+.chart h3 .hint{font-size:.6875rem;color:var(--ink-3);font-weight:400}
+.chart .cv{width:100%;height:280px}
+.chart.tall .cv{height:360px}
+.chart .nodata{height:280px;display:flex;align-items:center;justify-content:center;
+               color:var(--ink-3);font-size:.8125rem;
+               background:var(--line-2);border-radius:var(--r-s)}
+@media (max-width:880px){
+  .charts{grid-template-columns:1fr}
+  .chart .cv{height:240px}
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width:820px){
+  .nav{padding:0 12px;overflow-x:auto}
+  .nav a{padding:0 10px;font-size:.75rem}
+  .wrap{padding:16px 12px}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .card{padding:16px}
+  h1{font-size:1.125rem}
+}
+/* 窄到 480px 以下：统计卡片单列也放得下，按钮整行排 */
+@media (max-width:480px){
+  .grid{grid-template-columns:repeat(2,1fr)}
+  .bar{flex-direction:column;align-items:stretch}
+  .bar .btn{width:100%}
+}
+
+/* ============================================================
+   尊重系统的「减少动态效果」
+   ============================================================ */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+</style>
+{% block style %}{% endblock %}
+</head>
+<body>
+<div class="nav">
+  <span class="brand">ikee考务中心</span>
+  {# 每项都带图标：一眼能扫出功能；aria-current 让屏幕阅读器知道当前页 #}
+  {% set nav_items = [('/', '', '控制台', 'monitor'),
+                      ('/questions', '/question', '题库', 'book'),
+                      ('/practice', '/practice', '实操题库', 'edit'),
+                      ('/students', '/students', '学生机', 'list'),
+                      ('/discover', '/discover', '服务发现', 'wifi'),
+                      ('/logs', '/logs', '日志', 'history')] %}
+  {% for href, prefix, label, ic in nav_items %}
+    {% set active = (request.path == href) if href == '/'
+                    else request.path.startswith(prefix) %}
+    <a href="{{ href }}"{% if active %} class="on" aria-current="page"{% endif %}>
+      {{ icon(ic, 15) }} {{ label }}</a>
+  {% endfor %}
+  <a href="/screen" target="_blank" rel="noopener"
+     title="公开大屏（投屏用，新窗口打开，无需登录）">{{ icon('external', 15) }} 大屏</a>
+  <span class="spacer"></span>
+  <a href="/settings" class="warnbtn {% if request.path=='/settings' %}on{% endif %}"
+     {% if request.path=='/settings' %}aria-current="page"{% endif %}>
+    {{ icon('key', 15) }} 改密码</a>
+  <form method="post" action="/logout" style="display:inline">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <button class="outbtn" type="submit">{{ icon('logout', 15) }} 退出</button>
+  </form>
+</div>
+<div class="wrap">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for cat, msg in messages %}
+        <div class="flash {{ 'err' if cat == 'err' }}">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</div>
+
+<!-- ECharts 本地文件：机房没有外网也能显示图表 -->
+<script src="/static/echarts.min.js"></script>
+<script>
+/* ============================================================
+   图表小工具：统一配色 / 空数据提示 / 自适应尺寸
+   各页面只需要：ExamChart.bar(elId, {labels:[], values:[]})
+   ============================================================ */
+var ExamChart = (function () {
+  /* 图表配色跟着设计令牌走（首色 = 品牌主色），
+     每个色块在白底上 ≥3:1（非文字元素的最低要求） */
+  var COLOR = ['#2563eb', '#15803d', '#d97706', '#dc2626', '#7c3aed',
+               '#0e7490', '#be123c', '#4d7c0f'];
+  var instances = [];
+  /* 尊重系统「减少动态效果」：这类用户的图表动画会变成纯闪烁 */
+  var REDUCED = !!(window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  function css(v) {
+    return getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  }
+
+  function base(el) {
+    return {
+      color: COLOR,
+      textStyle: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 12 },
+      grid: { left: 8, right: 16, top: 30, bottom: 8, containLabel: true },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      animation: !REDUCED,
+      animationDuration: 500
+    };
+  }
+
+  /* 图表是 canvas，读屏软件读不到内容 —— 在旁边放一段纯文字摘要。
+     饼图/环形图尤其需要：颜色是唯一区分手段时无法访问。 */
+  function summary(id, text) {
+    var el = document.getElementById(id);
+    if (!el || !text) return;
+    var sib = el.nextElementSibling;
+    if (!sib || !sib.className || sib.className.indexOf('cs') < 0) {
+      sib = document.createElement('p');
+      sib.className = 'sr-only cs';
+      el.parentNode.insertBefore(sib, el.nextSibling);
+    }
+    sib.textContent = text;
+  }
+
+  /* 给图表容器一个无障碍名称（data-label 由模板给出） */
+  function nameIt(id, fallback) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (!el.getAttribute('role')) el.setAttribute('role', 'img');
+    var label = el.getAttribute('data-label') || fallback;
+    if (label) el.setAttribute('aria-label', label);
+  }
+
+  function init(id) {
+    var el = document.getElementById(id);
+    if (!el || typeof echarts === 'undefined') return null;
+    var ins = echarts.getInstanceByDom(el) || echarts.init(el);
+    if (instances.indexOf(ins) < 0) instances.push(ins);
+    return ins;
+  }
+
+  function empty(id, msg) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = '<div class="nodata">' + (msg || '暂无数据') + '</div>';
+  }
+
+  function render(id, option, isEmpty, emptyMsg) {
+    if (isEmpty) { empty(id, emptyMsg); return; }
+    var ins = init(id);
+    if (!ins) { empty(id, '图表组件未加载'); return; }
+    nameIt(id);
+    ins.clear();
+    ins.setOption(option, true);
+    ins.resize();
+  }
+
+  window.addEventListener('resize', function () {
+    instances.forEach(function (i) { try { i.resize(); } catch (e) {} });
+  });
+
+  return {
+    color: COLOR,
+    render: render,
+    empty: empty,
+
+    /* 柱状图 / 条形图 */
+    bar: function (id, d, opt) {
+      opt = opt || {};
+      var labels = d.labels || [], values = d.values || [];
+      var total = values.reduce(function (a, b) { return a + b; }, 0);
+      if (!total) { empty(id, opt.emptyMsg); return; }
+      var o = base(id);
+      o.tooltip = { trigger: 'axis', axisPointer: { type: 'shadow' },
+                    formatter: opt.formatter };
+      var series = {
+        type: 'bar',
+        name: opt.name || '人数',
+        data: values,
+        barMaxWidth: opt.horizontal ? 18 : 44,
+        itemStyle: { borderRadius: opt.horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0] },
+        label: { show: !!opt.showLabel, position: opt.horizontal ? 'right' : 'top',
+                 fontSize: 11, color: '#475569' }
+      };
+      if (opt.colors) {
+        series.itemStyle.color = function (p) { return opt.colors[p.dataIndex]; };
+      }
+      o.xAxis = opt.horizontal
+        ? { type: 'value' }
+        : { type: 'category', data: labels,
+            axisLabel: { interval: 0, rotate: opt.rotate || 0 } };
+      o.yAxis = opt.horizontal
+        ? { type: 'category', data: labels } : { type: 'value' };
+      o.series = [series];
+      render(id, o, false);
+      // 文字替代：让读屏软件/纯文本浏览器也能拿到数字
+      summary(id, (opt.name || '数量') + '：' + labels.map(function (l, i) {
+        return l + ' ' + values[i];
+      }).join('，'));
+    },
+
+    /* 环形图（占比 ≤5 项；超过请改用堆叠条） */
+    donut: function (id, d, opt) {
+      opt = opt || {};
+      var total = (d.values || []).reduce(function (a, b) { return a + b; }, 0);
+      if (!total) { empty(id, opt.emptyMsg); return; }
+      var o = {
+        color: opt.colors || COLOR,
+        animation: !REDUCED,
+        textStyle: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 12 },
+        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+        legend: { bottom: 0, itemWidth: 10, itemHeight: 10 },
+        series: [{
+          type: 'pie', radius: ['52%', '76%'], center: ['50%', '44%'],
+          avoidLabelOverlap: true,
+          itemStyle: { borderColor: '#fff', borderWidth: 2 },
+          // 扇形直接标名字+数值，不只靠颜色区分
+          label: { show: true, formatter: '{b}\n{c}' },
+          data: (d.labels || []).map(function (n, i) {
+            return { name: n, value: d.values[i] };
+          })
+        }]
+      };
+      render(id, o, false);
+      summary(id, (opt.name || '占比') + '：' + (d.labels || []).map(
+        function (n, i) {
+          var v = d.values[i];
+          return n + ' ' + v + '（' + Math.round(v / total * 100) + '%）';
+        }).join('，'));
+    },
+
+    /* 仪表盘（百分比） */
+    gauge: function (id, value, opt) {
+      opt = opt || {};
+      var o = {
+        animation: !REDUCED,
+        series: [{
+          type: 'gauge', startAngle: 210, endAngle: -30,
+          min: 0, max: 100, radius: '86%', center: ['50%', '58%'],
+          progress: { show: true, width: 16,
+                      itemStyle: { color: opt.color || '#16a34a' } },
+          axisLine: { lineStyle: { width: 16, color: [[1, '#e2e8f0']] } },
+          axisTick: { show: false },
+          splitLine: { length: 8, lineStyle: { color: '#cbd5e1' } },
+          axisLabel: { fontSize: 10, color: '#94a3b8', distance: 14 },
+          pointer: { show: false },
+          detail: { valueAnimation: !REDUCED, fontSize: 26, fontWeight: 'bold',
+                    offsetCenter: [0, '2%'],
+                    formatter: '{value}%', color: opt.color || '#16a34a' },
+          data: [{ value: value }]
+        }]
+      };
+      render(id, o, false);
+    },
+
+    /* 折线图（趋势） */
+    line: function (id, d, opt) {
+      opt = opt || {};
+      var o = base(id);
+      o.tooltip = { trigger: 'axis' };
+      o.xAxis = { type: 'category', boundaryGap: false, data: d.labels || [] };
+      o.yAxis = { type: 'value' };
+      o.series = [{ type: 'line', smooth: true, data: d.values || [],
+                    symbolSize: 7, areaStyle: { opacity: .12 },
+                    lineStyle: { width: 3 } }];
+      render(id, o, !(d.values || []).length);
+    }
+  };
+})();
+</script>
+{% block script %}{% endblock %}
+<script>
+/* flash 提示 5 秒后自动淡出收起（退出 180ms，比进入 240ms 快），
+   尊重「减少动态效果」：直接移除不做过渡 */
+(function () {
+  var reduce = window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.querySelectorAll('.flash').forEach(function (el) {
+    setTimeout(function () {
+      if (reduce) { el.remove(); return; }
+      el.style.opacity = '0';
+      setTimeout(function () { el.remove(); }, 200);
+    }, 5000);
+  });
+})();
+</script>
+<script>
+/* CSRF：给所有 POST 表单自动注入 token，模板里的 <form method="post"> 无需逐个手写 */
+document.addEventListener('submit', function (e) {
+  var f = e.target;
+  if (!f || f.tagName !== 'FORM') return;
+  if ((f.method || 'get').toLowerCase() !== 'post') return;
+  if (f.querySelector('input[name="_csrf"]')) return;
+  var i = document.createElement('input');
+  i.type = 'hidden'; i.name = '_csrf'; i.value = '{{ csrf_token }}';
+  f.appendChild(i);
+}, true);
+</script>
+<footer style="text-align:center;padding:18px 12px;color:#94a3b8;font-size:12px;
+                border-top:1px solid #eef2f7;margin-top:24px;line-height:1.8">
+  ikee考务中心 · 小可 自主开发 ·
+  <a href="https://www.ikee002.top/" target="_blank" rel="noopener">ikee002.top</a> ·
+  <a href="https://github.com/zk26/ikeexam" target="_blank" rel="noopener">GitHub 仓库</a> ·
+  MIT License
+</footer>
+</body>
+</html>

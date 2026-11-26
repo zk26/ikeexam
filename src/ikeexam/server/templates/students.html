@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}学生机{% endblock %}
+{% block body %}
+<div class="card">
+<h1>学生机（{{ students|length }} 台）</h1>
+<div class="bar">
+  <a class="btn gray" href="/students">刷新</a>
+  <form method="post" action="/students/clear" style="display:inline"
+        onsubmit="return confirm('确定清空所有学生机记录？下次心跳会重新注册')">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <button class="btn red" type="submit">清空列表</button>
+  </form>
+</div>
+<table>
+  <tr><th>座位</th><th>姓名</th><th>机器标识</th><th>IP</th><th>状态</th><th>在线</th><th>最后心跳</th><th>操作</th></tr>
+  {% for s in students %}
+  <tr>
+    <td>{{ s.seat or '-' }}</td>
+    <td><b>{{ s.name or '-' }}</b></td>
+    <td class="mono">{{ s.hostname }}</td>
+    <td class="mono">{{ s.ip }}</td>
+    <td>{{ {'idle':'待考','working':'答题中','theory_done':'理论已交','submitted':'已交卷'}.get(s.status, s.status) }}</td>
+    <td>{% if s.online %}<span class="tag ok">在线</span>{% else %}<span class="tag no">离线</span>{% endif %}</td>
+    <td class="muted">{{ s.last_seen|todate }}</td>
+    <td>
+      <form method="post" action="/students/{{ s.id }}/delete" style="display:inline"
+            onsubmit="return confirm('确定删除 {{ s.hostname }} 的记录？')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button class="btn red sm">删除</button>
+      </form>
+      <form method="post" action="/students/{{ s.id }}/reset-token" style="display:inline"
+            onsubmit="return confirm('重置后该机器需要重新连接？')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button class="btn ghost sm">重置凭证</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="8" class="muted">还没有学生机连接。学生端启动后会自动出现。</td></tr>
+  {% endfor %}
+</table>
+<p class="muted">
+  学生端启动后每 3 秒心跳一次，60 秒无心跳视为离线。<br>
+  学生端<b>不做机器绑定</b>：正常输入姓名/座位号，换谁坐这台机器登录就用谁的身份。
+  要防止乱填名字，去<b>考试编辑页 →「本场学生名单」</b>配一份名单，
+  姓名不在名单里的学生进不来考试。
+</p>
+</div>
+{% endblock %}

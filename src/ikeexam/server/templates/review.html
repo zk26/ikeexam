@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+{% block title %}试卷评讲 — {{ exam.title }}{% endblock %}
+{% block body %}
+<style>
+  body.review-big .wrap{font-size:118%}
+  .q-card{border:1px solid var(--line);border-radius:var(--r-s);padding:14px 16px;
+          margin-bottom:14px;background:#fff}
+  .q-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .q-no{font-weight:700;color:var(--brand);font-size:1.05rem}
+  .ans-box{display:none;margin-top:8px;border:1px dashed var(--green);
+           border-radius:var(--r-s);padding:8px 12px;background:#f2fbf5}
+  .ans-box.show{display:block}
+  .rate-bar{height:8px;border-radius:4px;background:var(--line-2);overflow:hidden;
+            min-width:120px;flex:1;max-width:260px}
+  .rate-bar>i{display:block;height:100%;background:var(--green)}
+  .chip{cursor:pointer;user-select:none}
+  .chip:hover{filter:brightness(.94)}
+  .pop-item{padding:4px 0;border-bottom:1px dashed var(--line-2);
+            display:flex;gap:8px;justify-content:space-between}
+  .pop-item:last-child{border-bottom:none}
+  .ans-txt{font-family:Consolas,monospace;background:var(--line-2);
+           border-radius:4px;padding:1px 8px;max-width:340px;
+           overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .opt-row{padding:3px 0}
+  .opt-row.ok{color:var(--green);font-weight:700}
+</style>
+
+<div class="page-head" style="display:flex;justify-content:space-between;
+     align-items:flex-end;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1 style="margin-bottom:4px">试卷评讲 — {{ exam.title }}</h1>
+    <p class="muted" style="margin:0">
+      {{ exam.grade or "" }} {% if exam.code %}· 考号 {{ exam.code }}{% endif %}
+      · 理论满分 {{ total_score }}
+      · 参考 {{ n_attended }} 人，已交卷 {{ n_submitted }} 人
+      · 答案默认藏着，投影讲题时点「看答案」再亮出来
+    </p>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <button type="button" class="btn ghost sm" id="btnFull"
+            onclick="toggleFullscreen()">全屏投影</button>
+    <button type="button" class="btn ghost sm" id="btnBig"
+            onclick="document.body.classList.toggle('review-big');
+                     this.textContent = document.body.classList.contains('review-big')
+                     ? '恢复正常字体' : '投影放大字体'">投影放大字体</button>
+    <a class="btn ghost sm" href="/">返回控制台</a>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+    <b>本页怎么用</b>
+    <span class="muted">点「看答案」亮出正确答案；点
+      <span class="tag ok">N 人做对</span> / <span class="tag warn">N 人做错</span> /
+      <span class="tag gray">N 人没答</span> 弹出名单和他们的作答。</span>
+  </div>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px">
+    <label class="muted">排序
+      <select id="qSort" onchange="resort()"
+              style="margin-left:6px">
+        <option value="no">按卷面顺序</option>
+        <option value="rate">按正确率（错得多的排前面）</option>
+      </select>
+    </label>
+    <label style="cursor:pointer">
+      <input type="checkbox" id="onlyWrong" onchange="filterWrong()">
+      只看有错的题（正确率 &lt; 100%）
+    </label>
+    <button type="button" class="btn ghost sm"
+            onclick="toggleAllAnswers(true)">全部亮答案</button>
+    <button type="button" class="btn ghost sm"
+            onclick="toggleAllAnswers(false)">全部收起</button>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+    {% if cards %}<a class="btn ghost sm" href="#sec-theory">理论题 {{ cards|length }}</a>{% endif %}
+    {% if has_practice %}<a class="btn ghost sm" href="#sec-practice">操作题 {{ task_cards|length }}</a>{% endif %}
+    {% if has_typing %}<a class="btn ghost sm" href="#sec-typing">打字练习</a>{% endif %}
+    {% if has_drawing %}<a class="btn ghost sm" href="#sec-drawing">画图作品 {{ drawings|length }}</a>{% endif %}
+  </div>
+</div>
+
+<!-- ==================== 理论题 ==================== -->
+<h2 id="sec-theory" style="margin:18px 0 10px">理论题（{{ cards|length }} 题）</h2>
+<div id="qList">
+{% for c in cards %}
+<div class="q-card" data-rate="{{ c.rate if c.rate is not none else '' }}"
+     data-no="{{ c.no }}" id="q{{ c.q.id }}">
+  <div class="q-head">
+    <span class="q-no">第 {{ c.no }} 题</span>
+    <span class="tag gray">{{ c.qtype }}</span>
+    {% if c.category %}<span class="tag gray">{{ c.category }}</span>{% endif %}
+    <span class="muted">{{ c.score }} 分</span>
+    <span style="flex:1"></span>
+    <span class="tag ok chip" title="点一下看是哪些同学做对了"
+          onclick="showPop('pop-{{ c.q.id }}-right', '第 {{ c.no }} 题 · 做对（{{ c.right_n }} 人）', 'right')">
+      ✅ {{ c.right_n }} 人做对</span>
+    <span class="tag warn chip" title="点一下看是哪些同学做错了、错在哪"
+          onclick="showPop('pop-{{ c.q.id }}-wrong', '第 {{ c.no }} 题 · 做错（{{ c.wrong_n }} 人）', 'wrong')">
+      ❌ {{ c.wrong_n }} 人做错</span>
+    {% if c.blank_n %}
+    <span class="tag gray chip" title="交了卷但这题没作答"
+          onclick="showPop('pop-{{ c.q.id }}-blank', '第 {{ c.no }} 题 · 交卷但没答（{{ c.blank_n }} 人）', 'blank')">
+      ⭕ {{ c.blank_n }} 人没答</span>
+    {% endif %}
+    <span class="muted" style="min-width:88px;text-align:right">
+      {% if c.rate is not none %}正确率 {{ c.rate }}%{% else %}还没人答{% endif %}</span>
+    <span class="rate-bar"><i style="width:{{ c.rate or 0 }}%"></i></span>
+    <button type="button" class="btn sm" onclick="toggleAns(this)">看答案</button>
+  </div>
+  <div style="font-size:1.02rem;margin:6px 0">{{ c.stem_html }}</div>
+  {% if c.opts %}
+    {# ⚠️ 正确选项只写在 data-ok 里，不能提前加 .ok 类 ——
+       那样页面一加载答案就漏了（绿色加粗的那项就是答案）。 #}
+    {% for o in c.opts %}
+    <div class="opt-row" data-letter="{{ o.letter }}"{% if o.ok %} data-ok="1"{% endif %}>
+      <b>{{ o.letter }}.</b> {{ o.html }}
+    </div>
+    {% endfor %}
+  {% endif %}
+  <div class="ans-box" id="ans-{{ c.q.id }}">
+    <b>正确答案：</b>
+    <span style="color:var(--green);font-weight:700">{{ c.answer_text }}</span>
+    {% if c.qtype == '多选题' %}<span class="muted">（多选，漏选/错选都不得分）</span>{% endif %}
+    {% if c.qtype == '拖拽题' %}<span class="muted">（按槽位给分，对几个给几分）</span>{% endif %}
+    {% if c.qtype in ('填空题', '程序填空') %}
+      <span class="muted">（多个空用「|」分隔；判分时忽略首尾标点）</span>
+    {% endif %}
+  </div>
+  {# 名单（隐藏，点人数弹出） #}
+  <div class="poplist" id="pop-{{ c.q.id }}-right" hidden>
+    {% for w in c.right %}
+    <div class="pop-item"><span>{{ w.seat }} {{ w.name }}</span>
+      <span class="muted">答对了</span></div>
+    {% else %}<div class="muted">还没有人做对</div>{% endfor %}
+  </div>
+  <div class="poplist" id="pop-{{ c.q.id }}-wrong" hidden>
+    {% for w in c.wrong %}
+    <div class="pop-item"><span>{{ w.seat }} {{ w.name }}</span>
+      <span>他的作答：<span class="ans-txt" title="{{ w.answer }}">{{ w.answer or '（空）' }}</span></span></div>
+    {% else %}<div class="muted">还没有人做错 🎉</div>{% endfor %}
+  </div>
+</div>
+{% else %}
+<p class="muted">这场考试还没有装理论题。</p>
+{% endfor %}
+</div>
+
+{% if has_practice or task_cards %}
+<!-- ==================== 操作题 ==================== -->
+<h2 id="sec-practice" style="margin:22px 0 10px">操作题（{{ task_cards|length }} 道）</h2>
+{% for tc in task_cards %}
+<div class="q-card">
+  <div class="q-head">
+    <span class="q-no">{{ tc.t.name }}</span>
+    <span class="tag gray">{{ {'word':'WPS 文字','excel':'WPS 表格','ppt':'WPS 演示'}.get(tc.t.etype, tc.t.etype) }}</span>
+    <span class="muted">满分 {{ tc.full }}</span>
+    <span style="flex:1"></span>
+    <span class="tag gray">已交 {{ tc.n }} 人{% if tc.empty_n %}（缺卷 {{ tc.empty_n }}）{% endif %}</span>
+    <span class="muted" style="min-width:120px;text-align:right">
+      {% if tc.avg is not none %}平均 {{ tc.avg }} 分（得分率 {{ tc.rate }}%）{% else %}还没人交{% endif %}</span>
+  </div>
+  {% if tc.rows %}
+  <p class="muted" style="margin:2px 0 8px 46px;font-size:12px">
+    点「评分点」看每个人在哪丢的分；「答卷」下载学生交的原文件投影展示。
+  </p>
+  <table class="tbl" style="width:100%">
+    <thead><tr>
+      <th style="width:64px">座位</th><th style="width:110px">姓名</th>
+      <th style="width:110px">得分</th><th style="width:100px">评分点</th>
+      <th>答卷文件</th><th style="width:150px"></th>
+    </tr></thead>
+    <tbody>
+    {% for r in tc.rows %}
+    <tr>
+      <td class="muted">{{ r.seat or '-' }}</td>
+      <td><b>{{ r.name }}</b></td>
+      <td>{% if r.empty %}<span class="tag warn">缺卷 · 0 分</span>
+          {% elif r.score is not none %}<b>{{ r.score }}</b><span class="muted"> / {{ r.full }}</span>
+          {% else %}<span class="tag gray">评分中</span>{% endif %}</td>
+      <td>{% if r.ck_n %}<b>{{ r.ck_ok }}</b> / {{ r.ck_n }} 个
+          {% else %}<span class="muted">-</span>{% endif %}</td>
+      <td class="muted" style="font-size:12px">{{ r.file or '（没交文件）' }}</td>
+      <td style="white-space:nowrap">
+        {% if r.detail %}<button class="btn ghost sm" onclick="toggleRow(this)">评分点</button>{% endif %}
+        {% if r.has_file %}<a class="btn ghost sm" href="/exam/{{ exam.id }}/submission/{{ r.sid }}/file">答卷</a>{% endif %}
+      </td>
+    </tr>
+    {% if r.detail %}
+    <tr class="ck-row" hidden><td colspan="6" style="background:var(--line-2)">
+      <table class="tbl" style="width:100%">
+        <thead><tr><th style="width:100px">评分点</th><th style="width:80px">得分</th>
+          <th style="width:80px">满分</th><th>说明</th></tr></thead>
+        <tbody>
+        {% for d in r.detail %}
+        <tr>
+          <td class="muted">{{ d.id }}</td>
+          <td>{% if (d.got or 0) >= (d.full or 0) %}<span class="tag ok">{{ d.got }}</span>
+              {% elif (d.got or 0) > 0 %}<span class="tag warn">{{ d.got }}</span>
+              {% else %}<span class="tag no">{{ d.got }}</span>{% endif %}</td>
+          <td class="muted">{{ d.full }}</td>
+          <td class="muted" style="font-size:12px">{{ d.msg }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </td></tr>
+    {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:2px 0 0 46px">还没有人交这份操作题。</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% if not task_cards %}<p class="muted">这场考试还没装操作题。</p>{% endif %}
+{% endif %}
+
+{% if has_typing %}
+<!-- ==================== 打字练习（勾了就讲：全部同学排名 + 详情） ==================== -->
+<h2 id="sec-typing" style="margin:22px 0 10px">打字练习（全部同学排名，不计分，评讲时表扬用）</h2>
+<div class="card">
+{% if typing_rows %}
+  <p class="muted" style="margin:0 0 10px">
+    综合评分 = 正确率 60% + 速度 40%（25 字/分算速度满分）。
+    点「详情」看每个人各项练到哪了（没做完的也有进度）。
+  </p>
+  <table class="tbl" style="width:100%;max-width:900px">
+    <thead><tr><th style="width:86px">名次</th><th>学生</th>
+      <th style="width:100px">综合评分</th>
+      <th style="width:130px">最快速度（字/分）</th>
+      <th style="width:110px">平均正确率</th>
+      <th style="width:110px">完成项目</th><th style="width:80px"></th></tr></thead>
+    <tbody>
+      {% for a in typing_rows %}
+      <tr>
+        <td>{% if loop.index <= 3 %}🏅{% endif %} 第 {{ a.rank }} 名</td>
+        <td><b>{{ a.seat }} {{ a.name }}</b></td>
+        <td><b>{{ a.overall }}</b></td>
+        <td>{{ a.wpm }}</td><td>{{ a.acc }}%</td>
+        <td>{% if a.done_n %}{{ a.done_n }} 项{% else %}<span class="muted">还没练</span>{% endif %}</td>
+        <td>{% if a.task_rows %}<button class="btn ghost sm" onclick="toggleRow(this)">详情</button>{% endif %}</td>
+      </tr>
+      {% if a.task_rows %}
+      <tr class="ck-row" hidden><td colspan="7" style="background:var(--line-2)">
+        <ul style="margin:0;padding-left:20px;line-height:2">
+          {% for tr in a.task_rows %}
+          <li><b>{{ tr.name }}</b>：{{ tr.line }}</li>
+          {% endfor %}
+        </ul>
+      </td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="muted" style="margin:0">还没有同学碰打字练习（练了这里会出全部人的排名）。</p>
+{% endif %}
+</div>
+{% endif %}
+
+{% if has_drawing %}
+<!-- ==================== 画板创作（勾了就讲：作品投影讲评） ==================== -->
+<h2 id="sec-drawing" style="margin:22px 0 10px">画图作品（{{ drawings|length }} 份，含画板 / 拼豆）</h2>
+<div class="card">
+{% if drawings %}
+  <p class="muted" style="margin:0 0 10px">
+    点缩略图<b>放大投影讲评</b>（键盘 ← → 切换上一个/下一个，Esc 关闭）。
+  </p>
+  <div style="display:flex;gap:14px;flex-wrap:wrap">
+    {% for d in drawings %}
+    <div style="width:230px">
+      <a href="javascript:void(0)" onclick="openDraw({{ loop.index0 }})"
+         title="点开投影讲评">
+        <img src="/exam/{{ exam.id }}/drawing/{{ d.hostname }}?kind={{ d.kind or 'draw' }}&participant_id={{ d.participant_id or 0 }}"
+             alt="{{ d.name or d.hostname }} 的画图作品"
+             style="width:100%;height:150px;object-fit:contain;background:var(--line-2);
+                    border:1px solid var(--line);border-radius:var(--r-s)">
+      </a>
+      <div class="muted" style="margin-top:4px;font-size:13px">
+        <b>{{ d.seat }} {{ d.name or d.hostname }}</b>
+        {% if (d.kind or 'draw') == 'beads' %}· 拼豆{% endif %}
+        · {{ (d.size / 1024) | round(1) }} KB
+        <a href="/exam/{{ exam.id }}/drawing/{{ d.hostname }}/download?kind={{ d.kind or 'draw' }}&participant_id={{ d.participant_id or 0 }}">下载</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="muted" style="margin:0">还没有同学提交画板作品。</p>
+{% endif %}
+</div>
+
+<!-- 作品灯箱：投影讲评用（大图 + 上一个/下一个） -->
+<div id="drawLight" style="display:none;position:fixed;inset:0;z-index:99;
+     background:rgba(15,23,42,.9)">
+  <div style="position:absolute;top:16px;left:0;right:0;text-align:center">
+    <b id="drawName" style="color:#fff;font-size:20px"></b>
+  </div>
+  <img id="drawImg"
+       style="max-width:86vw;max-height:74vh;position:absolute;top:50%;left:50%;
+              transform:translate(-50%,-54%);background:#fff;border-radius:10px">
+  <div style="position:absolute;bottom:28px;left:0;right:0;text-align:center;
+       display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+    <button class="btn" onclick="drawNav(-1)">← 上一个</button>
+    <button class="btn" onclick="drawNav(1)">下一个 →</button>
+    <a id="drawDl" class="btn ghost" style="color:#fff;border-color:#64748b">下载原图</a>
+    <button class="btn ghost" style="color:#fff;border-color:#64748b"
+            onclick="closeDraw()">关闭（Esc）</button>
+  </div>
+</div>
+<script>
+var DRAW = {{ draw_js | tojson }};
+var drawI = 0;
+function openDraw(i){
+  if(!DRAW.length) return;
+  drawI = (i + DRAW.length) % DRAW.length;
+  var d = DRAW[drawI];
+  var kd = '?kind=' + (d.kind || 'draw') + '&participant_id=' + (d.participant_id || 0);
+  document.getElementById('drawImg').src =
+    '/exam/{{ exam.id }}/drawing/' + d.host + kd;
+  document.getElementById('drawName').textContent =
+    d.name + ' 的作品（' + (drawI + 1) + ' / ' + DRAW.length + '）';
+  document.getElementById('drawDl').href =
+    '/exam/{{ exam.id }}/drawing/' + d.host + '/download' + kd;
+  document.getElementById('drawLight').style.display = 'block';
+}
+function drawNav(step){ openDraw(drawI + step); }
+function closeDraw(){ document.getElementById('drawLight').style.display = 'none'; }
+document.addEventListener('keydown', function(e){
+  var el = document.getElementById('drawLight');
+  if(!el || el.style.display !== 'block') return;
+  if(e.key === 'Escape') closeDraw();
+  else if(e.key === 'ArrowLeft') drawNav(-1);
+  else if(e.key === 'ArrowRight') drawNav(1);
+});
+</script>
+{% endif %}
+
+<!-- 弹窗 -->
+<div id="popMask" onclick="hidePop()"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:98"></div>
+<div id="popBox" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+     z-index:99;background:#fff;border-radius:var(--r-s);box-shadow:0 8px 40px rgba(0,0,0,.25);
+     width:min(520px,92vw);max-height:78vh;overflow:auto;padding:16px 18px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <b id="popTitle">名单</b>
+    <button type="button" class="btn ghost sm" onclick="hidePop()">关闭</button>
+  </div>
+  <div id="popBody"></div>
+</div>
+
+<script>
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.();
+  } else {
+    document.exitFullscreen?.();
+  }
+}
+/* 弹窗：把页面上隐藏的名单装进弹层（图片/文字都是服务端渲染好的） */
+function showPop(id, title, kind){
+  var src = document.getElementById(id);
+  if(!src) return;
+  document.getElementById('popTitle').textContent = title || '名单';
+  var body = document.getElementById('popBody');
+  body.innerHTML = src.innerHTML;
+  document.getElementById('popMask').style.display = 'block';
+  document.getElementById('popBox').style.display = 'block';
+}
+function hidePop(){
+  document.getElementById('popMask').style.display = 'none';
+  document.getElementById('popBox').style.display = 'none';
+}
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') hidePop();
+});
+
+/* 答案显示 / 隐藏（正确选项的高亮也在这里加，页面加载时绝不提前漏答案） */
+function toggleAns(btn){
+  var card = btn.closest('.q-card');
+  var box = card.querySelector('.ans-box');
+  var on = box.classList.toggle('show');
+  btn.textContent = on ? '收起答案' : '看答案';
+  card.querySelectorAll('.opt-row[data-ok="1"]').forEach(function(r){
+    r.classList.toggle('ok', on);
+    r.style.background = on ? '#f2fbf5' : '';
+  });
+}
+function toggleAllAnswers(on){
+  document.querySelectorAll('.q-card').forEach(function(card){
+    var box = card.querySelector('.ans-box');
+    var btn = card.querySelector('button.btn.sm');
+    if(!box) return;
+    box.classList.toggle('show', on);
+    if(btn && btn.textContent.indexOf('答案') >= 0){
+      btn.textContent = on ? '收起答案' : '看答案';
+    }
+    card.querySelectorAll('.opt-row[data-ok="1"]').forEach(function(r){
+      r.classList.toggle('ok', on);
+      r.style.background = on ? '#f2fbf5' : '';
+    });
+  });
+}
+
+/* 排序：按正确率（错得多在前）/ 恢复卷面顺序 */
+function rateOf(card){
+  var r = parseFloat(card.dataset.rate);
+  return isNaN(r) ? -1 : r;      // 还没人答的排最前（最需要讲）
+}
+function resort(){
+  var mode = document.getElementById('qSort').value;
+  var list = document.getElementById('qList');
+  var cards = Array.prototype.slice.call(list.querySelectorAll('.q-card'));
+  cards.sort(function(a, b){
+    if(mode === 'rate'){
+      return rateOf(a) - rateOf(b);
+    }
+    return (parseInt(a.dataset.no) || 0) - (parseInt(b.dataset.no) || 0);
+  });
+  cards.forEach(function(c){ list.appendChild(c); });
+}
+
+/* 展开/收起明细行（实操评分点 / 打字详情） */
+function toggleRow(btn){
+  var tr = btn.closest('tr');
+  var row = tr && tr.nextElementSibling;
+  if(row && row.classList.contains('ck-row')){
+    row.hidden = !row.hidden;
+    if(btn.tagName === 'BUTTON') btn.textContent = row.hidden
+      ? (btn.dataset.label || '详情') : '收起';
+  }
+}
+document.querySelectorAll('button[onclick^="toggleRow"]').forEach(function(b){
+  b.dataset.label = b.textContent.trim();
+});
+
+/* 只看有错的题：正确率 < 100% 或还没人答的都算「有错要讲」。
+   ⚠️ 不能用 (rate || 101) —— 0% 是 falsy，会被当成 100% 隐藏掉
+   （错得最多的题反而不显示）。 */
+function filterWrong(){
+  var only = document.getElementById('onlyWrong').checked;
+  document.querySelectorAll('.q-card').forEach(function(card){
+    var r = parseFloat(card.dataset.rate);
+    var needTalk = isNaN(r) || r < 100;
+    card.style.display = (!only || needTalk) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

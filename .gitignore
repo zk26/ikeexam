@@ -33,7 +33,8 @@ exams/
 老师端/
 materials/
 qimg/
-teacher/config.json
+src/ikeexam/teacher/config.json
+src/ikeexam/client/config.json
 
 # ---- 临时文件 ----
 *.part
