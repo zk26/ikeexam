@@ -11,7 +11,7 @@
 ; ============================================================
 
 #define MyAppName "ikee考务中心（老师端）"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "小可"
 #define MyAppURL "https://www.ikee002.top/"
 #define MyAppExeName "pythonw.exe"
@@ -65,6 +65,7 @@ Source: "build\src\ikeexam\teacher\*"; DestDir: "{app}\src\ikeexam\teacher"; Fla
 Source: "build\src\ikeexam\graders\*"; DestDir: "{app}\src\ikeexam\graders"; Flags: recursesubdirs ignoreversion createallsubdirs
 Source: "build\src\ikeexam\shared\*"; DestDir: "{app}\src\ikeexam\shared"; Flags: recursesubdirs ignoreversion createallsubdirs
 Source: "build\src\ikeexam\__init__.py"; DestDir: "{app}\src\ikeexam"; Flags: ignoreversion
+Source: "close_app.ps1"; Flags: dontcopy
 ; 内置题库、实操素材与题目图片，保持与 runtime.py 的目录规则一致
 Source: "build\题库\*"; DestDir: "{app}\题库"; Flags: recursesubdirs ignoreversion createallsubdirs
 Source: "build\materials\*"; DestDir: "{app}\materials"; Flags: recursesubdirs ignoreversion createallsubdirs
@@ -90,6 +91,64 @@ Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\src\ikeexam\teac
 var
   DeleteAllLocalData: Boolean;
 
+function RunCloseApp(const Helper, Root: string): Boolean;
+var
+  Params: string;
+  ResultCode: Integer;
+begin
+  Result := False;
+  if not FileExists(Helper) then
+  begin
+    MsgBox('找不到进程清理工具，无法安全关闭正在运行的软件。', mbError, MB_OK);
+    exit;
+  end;
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Helper +
+            '" -Root "' + Root + '"';
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+              Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('无法启动进程清理工具，请先手动关闭 ikee考务中心后重试。', mbError, MB_OK);
+    exit;
+  end;
+  if ResultCode <> 0 then
+  begin
+    MsgBox('ikee考务中心仍在运行，已停止当前操作。请手动关闭软件后重试。',
+           mbError, MB_OK);
+    exit;
+  end;
+  Result := True;
+end;
+
+function CloseRunningApp: Boolean;
+var
+  Helper: string;
+begin
+  Helper := ExpandConstant('{app}\close_app.ps1');
+  if not FileExists(Helper) then
+  begin
+    ExtractTemporaryFile('close_app.ps1');
+    Helper := ExpandConstant('{tmp}\close_app.ps1');
+  end;
+  Result := RunCloseApp(Helper, ExpandConstant('{app}'));
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  NeedsRestart := False;
+  Result := '';
+  if not CloseRunningApp then
+    Result := '无法关闭正在运行的 ikee考务中心，安装已取消。';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    if not CopyFile(ExpandConstant('{tmp}\close_app.ps1'),
+                    ExpandConstant('{app}\close_app.ps1'), False) then
+      MsgBox('进程清理工具复制失败，后续卸载时可能无法自动关闭软件。',
+             mbError, MB_OK);
+end;
+
 function CmdWantsDeleteAll: Boolean;
 var
   I: Integer;
@@ -107,6 +166,8 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
+    if not CloseRunningApp then
+      Abort;
     DeleteAllLocalData := CmdWantsDeleteAll;
     if not UninstallSilent and not DeleteAllLocalData then
     begin

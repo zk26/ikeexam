@@ -460,7 +460,7 @@ class TeacherApp:
             process = subprocess.Popen(
                 [interpreter, server_script, "--host", "0.0.0.0",
                  "--port", str(port), "--lan-ip", host],
-                cwd=os.path.join(root, "server"), env=env,
+                cwd=os.path.dirname(server_script), env=env,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )

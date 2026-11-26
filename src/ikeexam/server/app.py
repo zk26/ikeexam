@@ -519,7 +519,7 @@ for _i in range(2):
 @app.route("/admin_api/ping")
 def admin_api_ping():
     """探活 + 是否需首次设密（桌面老师端启动时先调这个）"""
-    return jsonify({"ok": True, "name": "ikee考务中心", "version": "2.0.0",
+    return jsonify({"ok": True, "name": "ikee考务中心", "version": "2.0.1",
                     "setup": auth.needs_setup(),
                     "passwordless_local": auth.passwordless_local()})
 
