@@ -32,7 +32,7 @@
     <li>密码以<b>哈希</b>形式存在 <span class="mono">server/auth.json</span>，不是明文</li>
     <li>只保护老师端后台页面，<b>学生端答题接口不受影响</b></li>
     <li>连续输错 5 次会锁定 60 秒（按 IP 计）</li>
-    <li>登录状态保持 8 小时</li>
+    <li>登录状态保持 24 小时，到期后必须重新登录</li>
     {% if updated %}
       <li>上次修改：{{ updated|todate }}</li>
     {% endif %}

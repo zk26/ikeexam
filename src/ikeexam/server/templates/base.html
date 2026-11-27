@@ -732,6 +732,16 @@ var ExamChart = (function () {
 </script>
 {% block script %}{% endblock %}
 <script>
+(function () {
+  var seconds = {{ session_expires_in|default(0)|int }};
+  if (seconds <= 0) return;
+  window.setTimeout(function () {
+    var next = location.pathname + location.search;
+    location.replace('/login?next=' + encodeURIComponent(next));
+  }, seconds * 1000);
+})();
+</script>
+<script>
 /* flash 提示 5 秒后自动淡出收起（退出 180ms，比进入 240ms 快），
    尊重「减少动态效果」：直接移除不做过渡 */
 (function () {

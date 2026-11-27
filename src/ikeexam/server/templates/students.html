@@ -1,6 +1,27 @@
 {% extends "base.html" %}
 {% block title %}学生机{% endblock %}
 {% block body %}
+<style>
+.resizable-scroll{max-width:100%;overflow:auto;scrollbar-gutter:stable}
+.resizable-table{table-layout:fixed}
+.resizable-table th{position:relative}
+.resizable-table th .col-resizer{position:absolute;z-index:4;right:-4px;top:0;width:9px;height:100%;
+  cursor:col-resize;touch-action:none;user-select:none}
+.resizable-table th .col-resizer::after{content:"";position:absolute;right:4px;top:8px;bottom:8px;width:2px;
+  background:transparent;border-radius:2px}
+.resizable-table th .col-resizer:hover::after,.resizable-table th .col-resizer:focus-visible::after,
+.resizable-table.is-resizing th .col-resizer.active::after{background:var(--brand)}
+body.table-resizing,body.table-resizing *{cursor:col-resize!important;user-select:none!important}
+.student-menu{width:210px;padding:8px}
+.student-menu .btn{width:100%;justify-content:flex-start}
+.student-detail-mask{display:none;position:fixed;inset:0;z-index:120}
+.student-detail-box{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  z-index:121;width:min(520px,92vw);padding:22px}
+.student-detail-grid{display:grid;grid-template-columns:110px minmax(0,1fr);gap:9px 14px;margin:16px 0 20px}
+.student-detail-grid dt{font-weight:800;color:var(--ink-2)}
+.student-detail-grid dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:520px){.student-detail-grid{grid-template-columns:1fr;gap:3px}.student-detail-grid dd{margin-bottom:8px}}
+</style>
 <div class="card">
 <h1>学生机（{{ students|length }} 台）</h1>
 <div class="bar">
@@ -10,11 +31,31 @@
     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
     <button class="btn red" type="submit">清空列表</button>
   </form>
+  <span class="muted">右键学生机行可查看详情、重置机器令牌或刷新；拖动表头分隔线调整列宽，双击表头自适应。</span>
 </div>
-<table>
-  <tr><th>座位</th><th>姓名</th><th>机器标识</th><th>IP</th><th>状态</th><th>在线</th><th>最后心跳</th><th>操作</th></tr>
+<div class="scroll resizable-scroll" tabindex="0" aria-label="学生机列表，可横向滚动">
+<table id="students-table" class="resizable-table" data-resizable
+       data-table-key="students" data-min-width="1120" style="min-width:1120px">
+  <colgroup>
+    <col style="width:80px" data-default-width="80" data-min-width="64">
+    <col style="width:140px" data-default-width="140" data-min-width="100">
+    <col style="width:200px" data-default-width="200" data-min-width="150">
+    <col style="width:150px" data-default-width="150" data-min-width="120">
+    <col style="width:120px" data-default-width="120" data-min-width="96">
+    <col style="width:100px" data-default-width="100" data-min-width="80">
+    <col style="width:160px" data-default-width="160" data-min-width="120">
+    <col style="width:220px" data-default-width="220" data-min-width="180">
+  </colgroup>
+  <thead>
+    <tr><th>座位</th><th>姓名</th><th>机器标识</th><th>IP</th><th>状态</th><th>在线</th><th>最后心跳</th><th>操作</th></tr>
+  </thead>
+  <tbody>
   {% for s in students %}
-  <tr>
+  <tr data-student-id="{{ s.id }}" data-hostname="{{ s.hostname }}"
+      data-seat="{{ s.seat or '' }}" data-name="{{ s.name or '' }}" data-ip="{{ s.ip or '' }}"
+      data-status="{{ {'idle':'待考','working':'答题中','theory_done':'理论已交','submitted':'已交卷'}.get(s.status, s.status) }}"
+      data-online="{{ 'true' if s.online else 'false' }}" data-last-seen="{{ s.last_seen|todate }}"
+      oncontextmenu="showStudentMenu(event, this)">
     <td>{{ s.seat or '-' }}</td>
     <td><b>{{ s.name or '-' }}</b></td>
     <td class="mono">{{ s.hostname }}</td>
@@ -24,21 +65,23 @@
     <td class="muted">{{ s.last_seen|todate }}</td>
     <td>
       <form method="post" action="/students/{{ s.id }}/delete" style="display:inline"
-            onsubmit="return confirm('确定删除 {{ s.hostname }} 的记录？')">
+            onsubmit="return confirm('确定删除这台学生机的记录？')">
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
         <button class="btn red sm">删除</button>
       </form>
       <form method="post" action="/students/{{ s.id }}/reset-token" style="display:inline"
             onsubmit="return confirm('重置后该机器需要重新连接？')">
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-        <button class="btn ghost sm">重置凭证</button>
+        <button class="btn ghost sm">重置机器令牌</button>
       </form>
     </td>
   </tr>
   {% else %}
   <tr><td colspan="8" class="muted">还没有学生机连接。学生端启动后会自动出现。</td></tr>
   {% endfor %}
+  </tbody>
 </table>
+</div>
 <p class="muted">
   学生端启动后每 3 秒心跳一次，60 秒无心跳视为离线。<br>
   学生端<b>不做机器绑定</b>：正常输入姓名/座位号，换谁坐这台机器登录就用谁的身份。
@@ -46,4 +89,227 @@
   姓名不在名单里的学生进不来考试。
 </p>
 </div>
+
+<div id="studentMenu" class="modal-card student-menu" role="menu" aria-label="学生机操作"
+     style="display:none;position:fixed;z-index:130">
+  <b id="studentMenuTitle" style="display:block;padding:6px 10px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></b>
+  <button class="btn sm ghost" role="menuitem" data-student-action="details">详情</button>
+  <button class="btn sm orange" role="menuitem" data-student-action="reset">重置机器令牌</button>
+  <button class="btn sm ghost" role="menuitem" data-student-action="refresh">刷新</button>
+</div>
+
+<div id="studentDetailMask" class="modal-mask student-detail-mask"
+     onclick="if(event.target===this)closeStudentDetail()"></div>
+<div id="studentDetailBox" class="modal-card student-detail-box" role="dialog" aria-modal="true"
+     aria-labelledby="studentDetailTitle">
+  <h2 id="studentDetailTitle" style="margin:0 0 8px;font-size:17px">学生机详情</h2>
+  <dl class="student-detail-grid">
+    <dt>机器标识</dt><dd id="studentDetailHostname">-</dd>
+    <dt>姓名</dt><dd id="studentDetailName">-</dd>
+    <dt>座位</dt><dd id="studentDetailSeat">-</dd>
+    <dt>IP</dt><dd id="studentDetailIp">-</dd>
+    <dt>状态</dt><dd id="studentDetailStatus">-</dd>
+    <dt>在线</dt><dd id="studentDetailOnline">-</dd>
+    <dt>最后心跳</dt><dd id="studentDetailLastSeen">-</dd>
+  </dl>
+  <div style="display:flex;justify-content:flex-end">
+    <button type="button" class="btn ghost sm" onclick="closeStudentDetail()">关闭</button>
+  </div>
+</div>
+
+<script>
+var MENU_STUDENT_ID = 0;
+var STUDENT_CSRF = {{ csrf_token|tojson }};
+
+function closeStudentMenu(){ document.getElementById('studentMenu').style.display = 'none'; }
+function showStudentMenu(event, row){
+  event.preventDefault();
+  closeStudentMenu();
+  MENU_STUDENT_ID = parseInt(row.getAttribute('data-student-id'), 10);
+  document.getElementById('studentMenuTitle').textContent = row.getAttribute('data-hostname') || '学生机';
+  var menu = document.getElementById('studentMenu');
+  menu.style.display = 'block';
+  var left = Math.min(event.clientX, window.innerWidth - menu.offsetWidth - 8);
+  var top = Math.min(event.clientY, window.innerHeight - menu.offsetHeight - 8);
+  menu.style.left = Math.max(8, left) + 'px';
+  menu.style.top = Math.max(8, top) + 'px';
+}
+function postStudentAction(url, message){
+  if(message && !confirm(message)) return;
+  var form = document.createElement('form');
+  form.method = 'post'; form.action = url;
+  var csrf = document.createElement('input');
+  csrf.type = 'hidden'; csrf.name = '_csrf'; csrf.value = STUDENT_CSRF;
+  form.appendChild(csrf); document.body.appendChild(form); form.submit();
+}
+function showStudentDetails(){
+  var row = document.querySelector('#students-table tbody tr[data-student-id="' + MENU_STUDENT_ID + '"]');
+  if(!row) return;
+  var values = {
+    studentDetailHostname:row.getAttribute('data-hostname') || '-',
+    studentDetailName:row.getAttribute('data-name') || '-',
+    studentDetailSeat:row.getAttribute('data-seat') || '-',
+    studentDetailIp:row.getAttribute('data-ip') || '-',
+    studentDetailStatus:row.getAttribute('data-status') || '-',
+    studentDetailOnline:row.getAttribute('data-online') === 'true' ? '在线' : '离线',
+    studentDetailLastSeen:row.getAttribute('data-last-seen') || '-'
+  };
+  Object.keys(values).forEach(function(id){ document.getElementById(id).textContent = values[id]; });
+  document.getElementById('studentDetailMask').style.display = 'block';
+  document.getElementById('studentDetailBox').style.display = 'block';
+}
+function closeStudentDetail(){
+  document.getElementById('studentDetailMask').style.display = 'none';
+  document.getElementById('studentDetailBox').style.display = 'none';
+}
+function runStudentMenuAction(action){
+  var id = MENU_STUDENT_ID;
+  closeStudentMenu();
+  if(action === 'details') showStudentDetails();
+  else if(action === 'reset') postStudentAction('/students/' + id + '/reset-token', '重置后该机器需要重新连接？');
+  else if(action === 'refresh') window.location.reload();
+}
+document.addEventListener('click', function(event){
+  var item = event.target.closest('#studentMenu [data-student-action]');
+  if(item){ runStudentMenuAction(item.getAttribute('data-student-action')); return; }
+  if(!event.target.closest('#studentMenu')) closeStudentMenu();
+});
+document.addEventListener('keydown', function(event){
+  if(event.key !== 'Escape') return;
+  closeStudentMenu(); closeStudentDetail();
+});
+window.addEventListener('resize', closeStudentMenu);
+window.addEventListener('scroll', closeStudentMenu, true);
+
+/* 可拖动列宽 + 双击表头自适应；宽度按表格持久保存。 */
+function setupResizableTable(table){
+  if(table._resizableReady) return;
+  var cols = Array.prototype.slice.call(table.querySelectorAll('colgroup > col'));
+  var headers = Array.prototype.slice.call(table.querySelectorAll('thead th'));
+  if(!cols.length || cols.length !== headers.length) return;
+  var storageKey = 'ikeexam.table.' + (table.getAttribute('data-table-key') || table.id);
+  var minTable = parseInt(table.getAttribute('data-min-width'), 10) || 0;
+  var widths = cols.map(function(col){ return parseInt(col.getAttribute('data-default-width'), 10) || 100; });
+  try {
+    var saved = JSON.parse(localStorage.getItem(storageKey));
+    if(Array.isArray(saved) && saved.length === widths.length &&
+       saved.every(function(v){ return typeof v === 'number' && isFinite(v) && v >= 40; })){
+      widths = saved;
+    }
+  } catch(e){}
+  function minWidth(i){ return parseInt(cols[i].getAttribute('data-min-width'), 10) || 48; }
+  function maxWidth(i){ return parseInt(cols[i].getAttribute('data-max-width'), 10) || 900; }
+  function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
+  function sum(){ return widths.reduce(function(a, b){ return a + b; }, 0); }
+  var handles = [];
+  function apply(persist){
+    var total = sum();
+    if(total < minTable) widths[widths.length - 1] += minTable - total;
+    cols.forEach(function(col, i){ col.style.width = widths[i] + 'px'; });
+    var available = table.parentElement ? table.parentElement.clientWidth : 0;
+    table.style.width = Math.max(sum(), available, minTable) + 'px';
+    table.style.minWidth = minTable + 'px';
+    handles.forEach(function(handle, i){
+      handle.setAttribute('aria-valuemin', minWidth(i));
+      handle.setAttribute('aria-valuemax', maxWidth(i));
+      handle.setAttribute('aria-valuenow', Math.round(widths[i]));
+    });
+    if(persist){
+      try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch(e){}
+    }
+  }
+  var probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none;';
+  document.body.appendChild(probe);
+  function fitColumn(index){
+    var wanted = minWidth(index);
+    Array.prototype.forEach.call(table.querySelectorAll('tr'), function(row){
+      var cell = row.cells[index];
+      if(!cell || cell.colSpan > 1) return;
+      var clone = cell.cloneNode(true);
+      clone.style.display = 'inline-block';
+      clone.style.width = 'auto';
+      clone.style.maxWidth = 'none';
+      clone.style.whiteSpace = 'nowrap';
+      Array.prototype.forEach.call(clone.querySelectorAll('[id]'), function(el){ el.removeAttribute('id'); });
+      probe.appendChild(clone);
+      wanted = Math.max(wanted, Math.ceil(clone.getBoundingClientRect().width) + 4);
+      clone.parentNode.removeChild(clone);
+    });
+    widths[index] = clamp(wanted, minWidth(index), maxWidth(index));
+    apply(true);
+  }
+  function resizePair(index, delta, persist){
+    var next = index + 1;
+    if(next >= widths.length) return;
+    var target = clamp(widths[index] + delta, minWidth(index), maxWidth(index));
+    var applied = target - widths[index];
+    var nextTarget = clamp(widths[next] - applied, minWidth(next), maxWidth(next));
+    applied = widths[next] - nextTarget;
+    widths[index] = clamp(widths[index] + applied, minWidth(index), maxWidth(index));
+    widths[next] = nextTarget;
+    apply(persist);
+  }
+  headers.forEach(function(header, index){
+    if(index === headers.length - 1) return;
+    var handle = document.createElement('span');
+    handle.className = 'col-resizer';
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', (header.textContent || '').trim() + '列宽，拖动或双击自适应');
+    handle.setAttribute('title', '拖动调整列宽；双击自动适配');
+    handle.tabIndex = 0;
+    header.appendChild(handle);
+    handles[index] = handle;
+    handle.addEventListener('pointerdown', function(event){
+      if(event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      widths = headers.map(function(th){ return th.getBoundingClientRect().width; });
+      apply(false);
+      var lastX = event.clientX;
+      handle.classList.add('active');
+      table.classList.add('is-resizing');
+      document.body.classList.add('table-resizing');
+      handle.setPointerCapture(event.pointerId);
+      function move(ev){
+        if(ev.pointerId !== event.pointerId) return;
+        resizePair(index, ev.clientX - lastX, false);
+        lastX = ev.clientX;
+      }
+      function end(){
+        handle.classList.remove('active');
+        table.classList.remove('is-resizing');
+        document.body.classList.remove('table-resizing');
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+        apply(true);
+      }
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    });
+    handle.addEventListener('dblclick', function(event){
+      event.preventDefault(); event.stopPropagation(); fitColumn(index);
+    });
+    handle.addEventListener('keydown', function(event){
+      if(event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      resizePair(index, event.key === 'ArrowRight' ? 10 : -10, true);
+    });
+  });
+  table.addEventListener('dblclick', function(event){
+    var th = event.target.closest('thead th');
+    if(!th || event.target.closest('.col-resizer')) return;
+    fitColumn(headers.indexOf(th));
+  });
+  window.addEventListener('resize', function(){ apply(false); });
+  table._resizableReady = true;
+  apply(false);
+}
+function enableResizableTables(){
+  document.querySelectorAll('table[data-resizable]').forEach(setupResizableTable);
+}
+enableResizableTables();
+</script>
 {% endblock %}

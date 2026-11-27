@@ -256,6 +256,96 @@ class RuleEditor(ScrollableFrame):
         return [self._read_row(row) for row in self.rows]
 
 
+class KeyPicker(ttk.Frame):
+    """可折叠的屏幕键盘选择器。"""
+
+    def __init__(self, master, on_change=None, mode="keys", **kwargs):
+        super().__init__(master, **kwargs)
+        self.on_change = on_change
+        self.mode = mode
+        self.var = tk.StringVar()
+        self.columnconfigure(0, weight=1)
+        self.entry = ttk.Entry(self, textvariable=self.var, state="readonly")
+        self.entry.grid(row=0, column=0, sticky="ew")
+        self.button = ttk.Button(self, text="选择按键", command=self._open)
+        self.button.grid(row=0, column=1, padx=(6, 0))
+        self.var.trace_add("write", lambda *args: self._changed())
+
+    def _changed(self):
+        if self.on_change:
+            self.on_change()
+
+    def set(self, values):
+        if isinstance(values, str):
+            values = [part for part in values.replace("，", ",").split(",") if part]
+        self.var.set(", ".join(str(value) for value in (values or [])))
+
+    def get(self):
+        return self.var.get()
+
+    def _open(self):
+        top = tk.Toplevel(self)
+        top.title("选择按键")
+        top.transient(self.winfo_toplevel())
+        top.configure(bg="#FCF8F2")
+        top.resizable(False, False)
+        selected = {part.strip().lower() for part in self.var.get().split(",") if part.strip()}
+        variables = {}
+        rows = [
+            list("1234567890"),
+            list("QWERTYUIOP"),
+            list("ASDFGHJKL"),
+            list("ZXCVBNM"),
+            ["space", "backspace", "enter", "shift", "capslock"],
+        ]
+        if self.mode == "letters":
+            rows = [list("abcdefghijklmnopqrstuvwxyz")[:13],
+                    list("abcdefghijklmnopqrstuvwxyz")[13:]]
+        else:
+            rows.insert(-1, ["esc", "tab", "delete", "up", "down", "left", "right"])
+        body = ttk.Frame(top, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="点击按键进行选择，留空表示全部。",
+                  style="Muted.TLabel").grid(row=0, column=0, columnspan=10,
+                                             sticky="w", pady=(0, 10))
+        for row_index, keys in enumerate(rows, 1):
+            for column, key in enumerate(keys):
+                label = {"space": "空格", "backspace": "退格", "enter": "回车",
+                         "shift": "Shift", "capslock": "Caps", "esc": "Esc",
+                         "tab": "Tab", "delete": "Del", "up": "↑", "down": "↓",
+                         "left": "←", "right": "→"}.get(key, key)
+                var = tk.BooleanVar(value=key.lower() in selected)
+                variables[key.lower()] = var
+                check = ttk.Checkbutton(body, text=label, variable=var, width=3,
+                                        style="Choice.TCheckbutton")
+                check.grid(row=row_index, column=column, padx=3, pady=3)
+        actions = ttk.Frame(body)
+        actions.grid(row=len(rows) + 1, column=0, columnspan=10,
+                     sticky="e", pady=(12, 0))
+
+        def choose_all(value):
+            for var in variables.values():
+                var.set(value)
+
+        def finish():
+            ordered = [key for row in rows for key in row
+                       if variables[key.lower()].get()]
+            self.set(ordered)
+            top.destroy()
+
+        ttk.Button(actions, text="全选", command=lambda: choose_all(True)).pack(
+            side="left", padx=4)
+        ttk.Button(actions, text="清空", command=lambda: choose_all(False)).pack(
+            side="left", padx=4)
+        ttk.Button(actions, text="完成", command=finish).pack(side="right")
+        top.bind("<Escape>", lambda event: top.destroy())
+        top.update_idletasks()
+        x = self.winfo_rootx() + max(0, (self.winfo_width() - top.winfo_width()) // 2)
+        y = self.winfo_rooty() + max(0, (self.winfo_height() - top.winfo_height()) // 2)
+        top.geometry(f"+{x}+{y}")
+        top.grab_set()
+
+
 class TypingConfigEditor(ScrollableFrame):
     DEFAULTS = {
         "whack_mole": {"enabled": True, "level": "all", "rounds": 8, "grid": "3x3"},
@@ -266,57 +356,114 @@ class TypingConfigEditor(ScrollableFrame):
         "name_typing": {"enabled": True, "rounds": 5, "seconds": 0},
     }
 
-    def __init__(self, master, on_change=None, **kwargs):
+    def __init__(self, master, on_change=None, passages=None, passages_en=None, **kwargs):
         super().__init__(master, **kwargs)
         self.on_change = on_change
+        self.passages = {"typing_zh": passages or [], "typing_en": passages_en or []}
         self.task_vars = {}
         self.fields = {}
+        self.bodies = {}
+        self.passage_vars = {}
+        self.passage_maps = {}
         self.controls = []
+        self._loading = False
         self.inner.columnconfigure(0, weight=1)
         for index, task in enumerate(TYPING_TASKS):
+            key = task["key"]
             box = ttk.LabelFrame(self.inner, text=task["label"], padding=8)
             box.grid(row=index, column=0, sticky="ew", pady=(0, 8))
             enabled = tk.BooleanVar(value=True)
             enabled_check = ttk.Checkbutton(box, text="本场考试启用",
-                                            variable=enabled)
+                                            variable=enabled,
+                                            style="Choice.TCheckbutton")
             enabled_check.grid(row=0, column=0, sticky="w", pady=(0, 6))
-            self.task_vars[task["key"]] = enabled
+            self.task_vars[key] = enabled
             self.controls.append(enabled_check)
-            enabled.trace_add("write", lambda *args: self._changed())
+            enabled.trace_add("write", lambda *args, k=key: (
+                self._toggle_body(k), self._changed()))
             body = ttk.Frame(box)
             body.grid(row=1, column=0, sticky="ew")
             body.columnconfigure(1, weight=1)
             body.columnconfigure(3, weight=1)
-            self.fields[task["key"]] = []
+            self.bodies[key] = body
+            self.fields[key] = []
             for field_index, field in enumerate(task["fields"]):
-                target = body
                 row_no = field_index // 2
                 col_no = (field_index % 2) * 2
-                if field["kind"] == "textarea":
-                    ttk.Label(target, text=field["label"]).grid(
+                if field["key"] == "keys":
+                    ttk.Label(body, text=field["label"]).grid(
+                        row=row_no, column=col_no, sticky="w", padx=(0, 6))
+                    widget = KeyPicker(body, on_change=self._changed,
+                                       mode="letters" if key == "case_press" else "keys")
+                    widget.grid(row=row_no, column=col_no + 1, columnspan=3,
+                                sticky="ew", padx=(0, 12), pady=3)
+                    var = widget.var
+                    self.controls.extend((widget.entry, widget.button))
+                elif field["kind"] == "textarea":
+                    ttk.Label(body, text=field["label"]).grid(
                         row=row_no, column=col_no, sticky="w")
-                    widget = tk.Text(target, height=4, wrap="word",
+                    if key in self.passages:
+                        passage_var = tk.StringVar()
+                        passage_map = {}
+                        labels = []
+                        for passage in self.passages[key]:
+                            label = " · ".join(str(passage.get(part) or "") for part in
+                                               ("grade", "kind", "title")).strip(" ·")
+                            if not label:
+                                label = str(passage.get("title") or "未命名范文")
+                            passage_map[label] = passage
+                            labels.append(label)
+                        combo = ttk.Combobox(body, textvariable=passage_var,
+                                             state="readonly", width=28,
+                                             values=tuple(labels))
+                        combo.grid(row=row_no, column=col_no + 1, columnspan=3,
+                                   sticky="ew", pady=(0, 4))
+                        combo.bind("<<ComboboxSelected>>",
+                                   lambda event, k=key: self._choose_passage(k))
+                        self.passage_vars[key] = passage_var
+                        self.passage_maps[key] = passage_map
+                        self.controls.append(combo)
+                    widget = tk.Text(body, height=4, wrap="word",
                                      font=("Microsoft YaHei", 9))
-                    widget.grid(row=row_no + 1, column=col_no, columnspan=2,
+                    widget.grid(row=row_no + 1, column=col_no, columnspan=4,
                                 sticky="ew", pady=(2, 6))
                     var = None
                     widget.bind("<KeyRelease>", lambda event: self._changed())
                 else:
-                    ttk.Label(target, text=field["label"]).grid(
+                    ttk.Label(body, text=field["label"]).grid(
                         row=row_no, column=col_no, sticky="w", padx=(0, 6))
                     var = tk.StringVar()
                     if field["kind"] == "select":
-                        widget = ttk.Combobox(target, textvariable=var,
+                        widget = ttk.Combobox(body, textvariable=var,
                                               state="readonly", width=12,
                                               values=tuple(field.get("options") or []))
                     else:
-                        widget = ttk.Entry(target, textvariable=var, width=14)
+                        widget = ttk.Entry(body, textvariable=var, width=14)
                     widget.grid(row=row_no, column=col_no + 1, sticky="ew",
                                 padx=(0, 12), pady=3)
                     var.trace_add("write", lambda *args: self._changed())
                 self.controls.append(widget)
-                self.fields[task["key"]].append((field, widget, var))
+                self.fields[key].append((field, widget, var))
         self.set_config({})
+
+    def _toggle_body(self, key):
+        body = self.bodies.get(key)
+        if body is not None:
+            if self.task_vars[key].get():
+                body.grid(row=1, column=0, sticky="ew")
+            else:
+                body.grid_remove()
+
+    def _choose_passage(self, key):
+        if self._loading:
+            return
+        label = self.passage_vars[key].get()
+        passage = self.passage_maps[key].get(label) or {}
+        for field, widget, var in self.fields[key]:
+            if field["key"] == "text":
+                widget.delete("1.0", "end")
+                widget.insert("1.0", str(passage.get("text") or ""))
+        self._changed()
 
     def _changed(self):
         if self.on_change:
@@ -324,26 +471,33 @@ class TypingConfigEditor(ScrollableFrame):
 
     def set_config(self, config):
         config = config or {}
+        self._loading = True
         for task in TYPING_TASKS:
-            values = dict(self.DEFAULTS[task["key"]])
-            values.update(config.get(task["key"]) or {})
-            self.task_vars[task["key"]].set(bool(values.get("enabled", True)))
-            for field, widget, var in self.fields[task["key"]]:
+            key = task["key"]
+            values = dict(self.DEFAULTS[key])
+            values.update(config.get(key) or {})
+            self.task_vars[key].set(bool(values.get("enabled", True)))
+            if key in self.passage_vars:
+                self.passage_vars[key].set("")
+            for field, widget, var in self.fields[key]:
                 value = values.get(field["key"], "")
-                if isinstance(value, list):
-                    value = ", ".join(str(item) for item in value)
                 if var is None:
                     widget.delete("1.0", "end")
                     widget.insert("1.0", str(value or ""))
+                elif isinstance(widget, KeyPicker):
+                    widget.set(value)
                 else:
                     var.set(str(value or ""))
+            self._toggle_body(key)
+        self._loading = False
         self._bind_wheel()
 
     def get_config(self):
         result = {}
         for task in TYPING_TASKS:
-            item = {"enabled": bool(self.task_vars[task["key"]].get())}
-            for field, widget, var in self.fields[task["key"]]:
+            key = task["key"]
+            item = {"enabled": bool(self.task_vars[key].get())}
+            for field, widget, var in self.fields[key]:
                 raw = widget.get("1.0", "end").strip() if var is None else var.get().strip()
                 if field["kind"] == "number":
                     try:
@@ -356,7 +510,7 @@ class TypingConfigEditor(ScrollableFrame):
                 else:
                     value = raw
                 item[field["key"]] = value
-            result[task["key"]] = item
+            result[key] = item
         return result
 
 

@@ -52,11 +52,15 @@ class AdminAPI:
                 self._req("POST", self._path("logout"), {})
         except Exception:
             pass
+        self.discard_session()
+
+    def discard_session(self):
+        """只清除本地会话，不发起网络请求。"""
         with self._session_lock:
             self.csrf_token = ""
-            self.cj.clear()
-            for cookie in list(self.cj):
-                self.cj.clear(cookie.domain, cookie.path, cookie.name)
+            self.cj = http.cookiejar.CookieJar()
+            self.opener = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(self.cj))
 
     @staticmethod
     def _path(*parts):
@@ -210,11 +214,6 @@ class AdminAPI:
     def login(self, password):
         return self._req("POST", self._path("login"), {"password": password})
 
-    def set_passwordless(self, enabled):
-        return self._req("POST", self._path("passwordless"),
-                         {"enabled": bool(enabled)},
-                         headers={"X-ikeexam-Local": "1"})
-
     # ---- 总览 / 考试 ----
     def dashboard(self):
         return self._req("GET", self._path("dashboard"), timeout=20)
@@ -233,6 +232,9 @@ class AdminAPI:
 
     def delete_exam(self, eid):
         return self._req("DELETE", self._path("exam", int(eid)))
+
+    def copy_exam(self, eid):
+        return self._req("POST", self._path("exam", int(eid), "copy"), {})
 
     def set_exam_questions(self, eid, question_ids):
         return self._req("POST", self._path("exam", int(eid), "questions"),
@@ -315,6 +317,13 @@ class AdminAPI:
     def stats(self, eid):
         return self._req("GET", self._path("exam", int(eid), "stats"),
                          timeout=30)
+
+    def export_exams(self, exam_ids, timeout=120):
+        body = json.dumps({"ids": list(exam_ids)}, ensure_ascii=False).encode("utf-8")
+        return self._perform(
+            "POST", self._path("exams", "export"), body=body,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            timeout=timeout, binary=True)
 
     def export_exam(self, eid, fmt="json", timeout=120):
         fmt = str(fmt or "json").lower()

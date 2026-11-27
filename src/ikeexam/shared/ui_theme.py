@@ -348,13 +348,13 @@ def apply_theme(root, mode="light"):
                         font=bold, borderwidth=2, bordercolor=tokens["border"],
                         lightcolor=tokens["border"], darkcolor=tokens["border"])
         style.map(tab_style,
-                  background=[("selected", tokens["mint"]),
-                              ("active", tokens["lemon"]),
+                  background=[("selected", tokens["lavender"]),
+                              ("active", tokens["sky"]),
                               ("disabled", tokens["disabled_bg"])],
                   foreground=[("selected", tokens["text_strong"]),
                               ("active", tokens["text"]),
                               ("disabled", tokens["disabled_fg"])],
-                  bordercolor=[("selected", tokens["primary"]),
+                  bordercolor=[("selected", tokens["purple"]),
                                ("active", tokens["border"])],
                   expand=[("selected", (1, 1, 1, 0))])
         try:
@@ -444,9 +444,9 @@ def bind_mousewheel(widget, target=None, recursive=False):
                 return None
             try:
                 if int(getattr(event, "state", 0) or 0) & 1 and hasattr(view, "xview_scroll"):
-                    view.xview_scroll(delta)
+                    view.xview_scroll(delta, "units")
                 else:
-                    view.yview_scroll(delta)
+                    view.yview_scroll(delta, "units")
             except tk.TclError:
                 return None
             return "break"
@@ -535,6 +535,27 @@ def apply_to_tk(root, tokens=None):
 
     safe(root, bg=tokens["bg"])
     walk(root)
+
+
+def autofit_tree_column(tree, column):
+    """按表头和可见内容测量列宽；用户仍可拖动分隔线手动调整。"""
+    columns = list(tree["columns"])
+    if str(column).startswith("#"):
+        try:
+            column = columns[int(str(column)[1:]) - 1]
+        except (ValueError, IndexError):
+            return
+    if column not in columns:
+        return
+    font = tkfont.Font(root=tree, family=pick_family(tree), size=10)
+    heading = str(tree.heading(column, "text") or "")
+    width = font.measure(heading) + 28
+    for item in tree.get_children():
+        index = columns.index(column)
+        values = tree.item(item, "values") or []
+        if index < len(values):
+            width = max(width, font.measure(str(values[index])) + 28)
+    tree.column(column, width=max(44, min(width, 640)))
 
 
 def style_tree_tags(tree, tokens=None):

@@ -58,6 +58,14 @@ def main():
         assert editor.btn_save_selection.winfo_manager() == "grid"
         assert editor.btn_save.winfo_manager() == ""
         assert editor.q_pages["single"]["tree"].bind("<MouseWheel>")
+        assert editor.q_pages["single"]["tree"].bind("<Double-Button-1>")
+        assert any("单选题 (1)" in label for label in
+                   [editor.notebook.tab(tab, "text") for tab in editor.notebook.tabs()])
+        assert editor.overview_tree.exists("q:1")
+        assert editor.overview_total.cget("text") == "总分 2"
+        editor.overview_tree.selection_set("q:1")
+        editor._remove_overview_selected()
+        assert not editor.overview_tree.exists("q:1")
 
         question = mod.QuestionEditor(page, {
             "id": 1, "qtype": "single", "stem": "题", "options": ["甲", "乙"],

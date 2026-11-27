@@ -24,7 +24,6 @@
       <button class="btn ghost">整理分类</button>
     </form>
   </div>
-  </div>
 </div>
 
 <!-- 难度 / 来源 筛选（题目按「难度 + 来源」归类） -->
@@ -178,6 +177,14 @@
 
   <!-- 拖拽题专用：拖拽项 + 槽位（一行一个） -->
   <div id="dragRow" style="display:none">
+    <div class="row" style="align-items:center">
+      <label for="qDragLayout">布局</label>
+      <select name="drag_layout" id="qDragLayout">
+        <option value="grid">网格布局</option>
+        <option value="horizontal">横向流程</option>
+      </select>
+      <span class="muted">网格适合分组归类；横向流程适合按先后顺序拖放。</span>
+    </div>
     <div class="row" style="align-items:flex-start">
       <label style="margin-top:8px">拖拽项</label>
       <textarea name="drag_items" id="qDragItems" rows="5" style="width:46%"
@@ -212,18 +219,39 @@
 <style>
 .question-list-scroll{max-height:680px;overscroll-behavior:auto;scrollbar-gutter:stable}
 .question-list-scroll:focus{outline:2px solid var(--brand);outline-offset:2px}
+.resizable-table{table-layout:fixed}
+.resizable-table th{position:relative}
+.resizable-table th .col-resizer{position:absolute;z-index:4;right:-4px;top:0;width:9px;height:100%;
+  cursor:col-resize;touch-action:none;user-select:none}
+.resizable-table th .col-resizer::after{content:"";position:absolute;right:4px;top:8px;bottom:8px;width:2px;
+  background:transparent;border-radius:2px}
+.resizable-table th .col-resizer:hover::after,.resizable-table th .col-resizer:focus-visible::after,
+.resizable-table.is-resizing th .col-resizer.active::after{background:var(--brand)}
+body.table-resizing,body.table-resizing *{cursor:col-resize!important;user-select:none!important}
 </style>
 <h2>
   {% if current_cat %}{{ current_cat }}{% else %}全部题目{% endif %}
   {% if current_type %} · {{ qtype_cn.get(current_type, current_type) }}{% endif %}
 </h2>
 
-<div class="scroll exam-scroll question-list-scroll" tabindex="0" aria-label="题目列表，可滚动">
-<table>
-  <tr><th style="width:46px">ID</th><th style="width:74px">题型</th><th>题干</th>
-      <th style="width:120px">答案</th><th style="width:44px">分</th>
-      <th style="width:96px">分类</th><th style="width:120px">难度 · 来源</th>
-      <th style="width:150px">操作</th></tr>
+<div class="scroll exam-scroll question-list-scroll" tabindex="0" aria-label="题目列表，可滚动；拖动表头分隔线调整列宽，双击表头自适应">
+<table id="questions-table" class="resizable-table" data-resizable
+      data-table-key="questions" data-min-width="1120" style="min-width:1120px">
+  <colgroup>
+    <col style="width:64px" data-default-width="64" data-min-width="52">
+    <col style="width:92px" data-default-width="92" data-min-width="76">
+    <col style="width:360px" data-default-width="360" data-min-width="240">
+    <col style="width:160px" data-default-width="160" data-min-width="110">
+    <col style="width:64px" data-default-width="64" data-min-width="52">
+    <col style="width:140px" data-default-width="140" data-min-width="100">
+    <col style="width:180px" data-default-width="180" data-min-width="140">
+    <col style="width:190px" data-default-width="190" data-min-width="150">
+  </colgroup>
+  <thead>
+  <tr><th>ID</th><th>题型</th><th>题干</th><th>答案</th><th>分</th>
+      <th>分类</th><th>难度 · 来源</th><th>操作</th></tr>
+  </thead>
+  <tbody>
   {% for q in questions %}
   <tr id="q{{ q.id }}">
     <td class="muted">{{ q.id }}</td>
@@ -258,6 +286,7 @@
   {% else %}
   <tr><td colspan="8"><div class="empty">没有题目。导入题库或手动添加。</div></td></tr>
   {% endfor %}
+  </tbody>
 </table>
 </div>
 </div>
@@ -289,6 +318,138 @@ function enableQuestionScrollWheel(){
   });
 }
 enableQuestionScrollWheel();
+
+/* 可拖动列宽 + 双击表头自适应；宽度按表格持久保存。 */
+function setupResizableTable(table){
+  if(table._resizableReady) return;
+  var cols = Array.prototype.slice.call(table.querySelectorAll('colgroup > col'));
+  var headers = Array.prototype.slice.call(table.querySelectorAll('thead th'));
+  if(!cols.length || cols.length !== headers.length) return;
+  var storageKey = 'ikeexam.table.' + (table.getAttribute('data-table-key') || table.id);
+  var minTable = parseInt(table.getAttribute('data-min-width'), 10) || 0;
+  var widths = cols.map(function(col){ return parseInt(col.getAttribute('data-default-width'), 10) || 100; });
+  try {
+    var saved = JSON.parse(localStorage.getItem(storageKey));
+    if(Array.isArray(saved) && saved.length === widths.length &&
+       saved.every(function(v){ return typeof v === 'number' && isFinite(v) && v >= 40; })){
+      widths = saved;
+    }
+  } catch(e){}
+  function minWidth(i){ return parseInt(cols[i].getAttribute('data-min-width'), 10) || 48; }
+  function maxWidth(i){ return parseInt(cols[i].getAttribute('data-max-width'), 10) || 900; }
+  function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
+  function sum(){ return widths.reduce(function(a, b){ return a + b; }, 0); }
+  var handles = [];
+  function apply(persist){
+    var total = sum();
+    if(total < minTable) widths[widths.length - 1] += minTable - total;
+    cols.forEach(function(col, i){ col.style.width = widths[i] + 'px'; });
+    var available = table.parentElement ? table.parentElement.clientWidth : 0;
+    table.style.width = Math.max(sum(), available, minTable) + 'px';
+    table.style.minWidth = minTable + 'px';
+    handles.forEach(function(handle, i){
+      handle.setAttribute('aria-valuemin', minWidth(i));
+      handle.setAttribute('aria-valuemax', maxWidth(i));
+      handle.setAttribute('aria-valuenow', Math.round(widths[i]));
+    });
+    if(persist){
+      try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch(e){}
+    }
+  }
+  var probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none;';
+  document.body.appendChild(probe);
+  function fitColumn(index){
+    var wanted = minWidth(index);
+    Array.prototype.forEach.call(table.querySelectorAll('tr'), function(row){
+      var cell = row.cells[index];
+      if(!cell || cell.colSpan > 1) return;
+      var clone = cell.cloneNode(true);
+      clone.style.display = 'inline-block';
+      clone.style.width = 'auto';
+      clone.style.maxWidth = 'none';
+      clone.style.whiteSpace = 'nowrap';
+      Array.prototype.forEach.call(clone.querySelectorAll('[id]'), function(el){ el.removeAttribute('id'); });
+      probe.appendChild(clone);
+      wanted = Math.max(wanted, Math.ceil(clone.getBoundingClientRect().width) + 4);
+      clone.parentNode.removeChild(clone);
+    });
+    widths[index] = clamp(wanted, minWidth(index), maxWidth(index));
+    apply(true);
+  }
+  function resizePair(index, delta, persist){
+    var next = index + 1;
+    if(next >= widths.length) return;
+    var target = clamp(widths[index] + delta, minWidth(index), maxWidth(index));
+    var applied = target - widths[index];
+    var nextTarget = clamp(widths[next] - applied, minWidth(next), maxWidth(next));
+    applied = widths[next] - nextTarget;
+    widths[index] = clamp(widths[index] + applied, minWidth(index), maxWidth(index));
+    widths[next] = nextTarget;
+    apply(persist);
+  }
+  headers.forEach(function(header, index){
+    if(index === headers.length - 1) return;
+    var handle = document.createElement('span');
+    handle.className = 'col-resizer';
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', (header.textContent || '').trim() + '列宽，拖动或双击自适应');
+    handle.setAttribute('title', '拖动调整列宽；双击自动适配');
+    handle.tabIndex = 0;
+    header.appendChild(handle);
+    handles[index] = handle;
+    handle.addEventListener('pointerdown', function(event){
+      if(event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      widths = headers.map(function(th){ return th.getBoundingClientRect().width; });
+      apply(false);
+      var lastX = event.clientX;
+      handle.classList.add('active');
+      table.classList.add('is-resizing');
+      document.body.classList.add('table-resizing');
+      handle.setPointerCapture(event.pointerId);
+      function move(ev){
+        if(ev.pointerId !== event.pointerId) return;
+        resizePair(index, ev.clientX - lastX, false);
+        lastX = ev.clientX;
+      }
+      function end(){
+        handle.classList.remove('active');
+        table.classList.remove('is-resizing');
+        document.body.classList.remove('table-resizing');
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+        apply(true);
+      }
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    });
+    handle.addEventListener('dblclick', function(event){
+      event.preventDefault(); event.stopPropagation(); fitColumn(index);
+    });
+    handle.addEventListener('keydown', function(event){
+      if(event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      resizePair(index, event.key === 'ArrowRight' ? 10 : -10, true);
+    });
+  });
+  table.addEventListener('dblclick', function(event){
+    var th = event.target.closest('thead th');
+    if(!th || event.target.closest('.col-resizer')) return;
+    fitColumn(headers.indexOf(th));
+  });
+  window.addEventListener('resize', function(){ apply(false); });
+  table._resizableReady = true;
+  apply(false);
+}
+function enableResizableTables(){
+  document.querySelectorAll('table[data-resizable]').forEach(setupResizableTable);
+}
+enableResizableTables();
+
 /* ============================================================
    题库表单：一套表单两种模式
    ------------------------------------------------------------
@@ -363,6 +524,7 @@ function editQ(btn){
   for(var i=0;i<4;i++) setv('qOpt'+i, '');
   setv('qCode', ''); setv('qStdin', ''); setv('qStdout', ''); setv('catCustom', '');
   setv('qDragItems', ''); setv('qDragSlots', '');
+  setv('qDragLayout', 'grid');
 
   $('qType').value = q.qtype;
   onTypeChange();                       // 先按题型显示/隐藏，再填值
@@ -375,6 +537,7 @@ function editQ(btn){
     try {
       var pl = JSON.parse(q.payload || '{}');
       setv('qDragSlots', (pl.slots || []).join('\n'));
+      setv('qDragLayout', pl.layout === 'horizontal' ? 'horizontal' : 'grid');
     } catch(e){}
   } else {
     for(var j=0;j<4;j++) setv('qOpt'+j, stripOptPrefix(opts[j]));

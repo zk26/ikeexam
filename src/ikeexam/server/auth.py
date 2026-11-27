@@ -66,9 +66,9 @@ def ensure():
         return h, True
     if d.get("hash"):
         return d["hash"], False
-    if os.path.isfile(AUTH_FILE) and not d.get("passwordless_local"):
+    if os.path.isfile(AUTH_FILE):
         # 文件存在但读不出哈希 = 已损坏。备份后进入未初始化，让老师重新设置，
-        # 不静默覆盖老师的密码。仅启用本机免密码时允许暂时没有哈希。
+        # 不静默覆盖老师的密码。
         bak = AUTH_FILE + ".bak"
         try:
             os.replace(AUTH_FILE, bak)
@@ -102,18 +102,6 @@ def set_password(plain):
     data = _read()
     data.update({"hash": generate_password_hash(plain),
                  "updated_at": time.time()})
-    _write(data)
-    return True
-
-
-def passwordless_local():
-    return bool(_read().get("passwordless_local"))
-
-
-def set_passwordless(enabled):
-    data = _read()
-    data["passwordless_local"] = bool(enabled)
-    data["updated_at"] = time.time()
     _write(data)
     return True
 

@@ -44,10 +44,11 @@ class DragBoard(tk.Frame):
     """
 
     def __init__(self, parent, items, slots, on_change=None,
-                 image_getter=None, initial=""):
+                 image_getter=None, initial="", layout="grid"):
         super().__init__(parent, bg=BG)
         self.items = [str(x) for x in (items or [])]
         self.slots = [str(x) for x in (slots or [])]
+        self.layout = "horizontal" if layout == "horizontal" else "grid"
         self.on_change = on_change
         self.image_getter = image_getter
         self.photos = {}                 # 字母 -> PhotoImage（异步到货）
@@ -87,6 +88,8 @@ class DragBoard(tk.Frame):
 
     # ---------- 布局 ----------
     def _slot_cols(self):
+        if self.layout == "horizontal":
+            return min(len(self.slots), 5) or 1
         return 2 if len(self.slots) <= 4 else 3
 
     def _item_cols(self):
@@ -109,13 +112,13 @@ class DragBoard(tk.Frame):
         c = self.canvas
         c.delete("all")
         self.images = {}
-        w = max(360, c.winfo_width())
-        pad, gap = 12, 12
+        w = max(420, c.winfo_width())
+        pad, gap = 16, 14
 
         # ---- 槽位区（上）----
         cols = self._slot_cols()
         sw = (w - pad * 2 - gap * (cols - 1)) / cols
-        sh = 78
+        sh = 112 if self.layout == "horizontal" else 92
         self.slot_boxes = {}
         for i in range(len(self.slots)):
             r, col = divmod(i, cols)
@@ -123,21 +126,19 @@ class DragBoard(tk.Frame):
             y0 = pad + r * (sh + gap)
             box = (x0, y0, x0 + sw, y0 + sh)
             self.slot_boxes[i + 1] = box
-            c.create_rectangle(*box, fill=SLOT_BG, outline=LINE, width=2,
+            c.create_rectangle(*box, fill=_UI["lemon"], outline=LINE, width=2,
                                tags=("slot", f"slot{i + 1}"))
-            c.create_text(x0 + 8, y0 + 10, anchor="nw", width=sw - 16,
-                          text=f"{i + 1}. {self.slots[i]}", fill=GRAY,
-                          font=(FONT, 11), tags=("slot_label",))
+            label = f"{i + 1}. {self.slots[i]}"
+            c.create_text(x0 + 10, y0 + 12, anchor="nw", width=sw - 20,
+                          text=label, fill=GRAY,
+                          font=(FONT, 12, "bold"), tags=("slot_label",))
         slots_h = pad + ((len(self.slots) + cols - 1) // cols) * (sh + gap)
 
         # ---- 备选区（下）----
-        c.create_text(pad, slots_h + 2, anchor="nw", fill=INK,
-                      text="↓ 把下面的项目拖到上面的格子里（拖错了点一下就能取回来）",
-                      font=(FONT, 11))
-        tray_y = slots_h + 26
+        tray_y = slots_h + 8
         icols = self._item_cols()
         iw = (w - pad * 2 - gap * (icols - 1)) / icols
-        ih = 62
+        ih = 74
         self.item_boxes = {}
         for i in range(len(self.items)):
             r, col = divmod(i, icols)

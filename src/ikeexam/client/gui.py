@@ -53,11 +53,23 @@ class SubmitQueue:
         ok_lines, fail_lines = [], []
         total = len(self.items)
         for i, (label, fn) in enumerate(self.items):
-            self.events.put(("progress", i, total, label))
-            try:
-                ok_lines.append(f"· {label}：{fn() or '已提交'}")
-            except Exception as e:
-                fail_lines.append(f"· {label}：{e}")
+            last_error = None
+            for attempt in range(3):
+                self.events.put(("progress", i, total,
+                                 label if attempt == 0 else f"{label}（重试 {attempt}/3）"))
+                try:
+                    result = fn()
+                    if isinstance(result, dict) and result.get("ok") is False:
+                        raise RuntimeError(result.get("msg") or "提交失败")
+                    ok_lines.append(f"· {label}：{result or '已提交'}")
+                    last_error = None
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        time.sleep(0.8)
+            if last_error is not None:
+                fail_lines.append(f"· {label}：{last_error}")
         self.events.put(("progress", total, total, "完成"))
         self.events.put(("done", ok_lines, fail_lines))
 
@@ -170,6 +182,7 @@ class App:
                 pass
         self.frame = None
         self.uiq = queue.Queue()          # 后台线程 -> UI 的安全通道
+        self._auto_next_job = None
         self.banner = None                # 顶部断线横幅
         self._build_signature()
 
@@ -238,6 +251,7 @@ class App:
 
     def swap(self, builder):
         """销毁旧页面，创建新页面。同时更新页面追踪。"""
+        self._cancel_auto_next()
         # 根据 builder 函数名推断页面类型
         name = getattr(builder, "__name__", "")
         page_map = {"build_wait": "wait", "build_connecting": "connecting",
@@ -385,6 +399,7 @@ class App:
 
     def _leave_theory(self):
         """离开理论题页：先把攒下的答案交上去，别丢答案"""
+        self._cancel_auto_next()
         if not self.sheet:
             return
         try:
@@ -479,7 +494,8 @@ class App:
         try:
             import drawing_ui
             if not (eid and self.client.has_drawing()):
-                return
+                return True
+            ok = True
             for kind in self.client.drawing_styles():
                 st = self.client.drawing_state(kind)
                 if not drawing_ui.state_has_art(st):
@@ -487,10 +503,15 @@ class App:
                 data, ext = drawing_ui.export_state(st)
                 name = "拼豆作品" if kind == "beads" else "画板作品"
                 r = self.client.api.upload_drawing(eid, data, ext, kind=kind)
-                self._log_only(f"{name}已交" if r.get("ok")
-                               else f"{name}提交失败：{r.get('msg')}")
+                if r.get("ok"):
+                    self._log_only(f"{name}已交")
+                else:
+                    ok = False
+                    self._log_only(f"{name}提交失败：{r.get('msg')}")
+            return ok
         except Exception as e:
             self._log_only(f"画图作品提交失败：{e}")
+            return False
 
     def on_timeout(self):
         """
@@ -1284,6 +1305,7 @@ class App:
 
     def switch_tab(self, key):
         """切导航标签：只重建内容区，不重载试卷、不丢答案"""
+        self._cancel_auto_next()
         # 提交中 / 已交卷：禁止进入新页面（防止交卷后再改答案）
         if self.client.state.get("submitting") or self.client.state.get("submitted"):
             return
@@ -1583,7 +1605,7 @@ class App:
         board = DragBoard(parent, q.get("options") or [], slots,
                           on_change=lambda ans: self.save_current(ans),
                           image_getter=self._opt_photo,
-                          initial=saved or "")
+                          initial=saved or "", layout=q.get("layout", "grid"))
         board.pack(fill="both", expand=True)
         self.vars["_drag"] = board
         bar = tk.Frame(parent, bg=CARD)
@@ -1591,9 +1613,6 @@ class App:
         tk.Button(bar, text="清空重做", command=board.clear,
                   font=(FONT, 11), padx=14, pady=4,
                   bg=LINE_2, relief="flat", cursor="hand2").pack(side="left")
-        tk.Label(bar, text="  提示：拖错了点一下项目就能取回来",
-                 bg=CARD, fg=GRAY,
-                 font=(FONT, 10)).pack(side="left")
 
     # ---------- 试卷加载 ----------
     def _load_paper_into(self, parent):
@@ -1722,6 +1741,13 @@ class App:
         self.q_no = tk.Label(meta, text="", bg=CARD, fg=BLUE,
                              font=(FONT, 12, "bold"))
         self.q_no.pack(side="left")
+        self.auto_next_var = tk.BooleanVar(value=self.cfg.auto_next)
+        self.auto_next_check = ttk.Checkbutton(
+            meta, text="自动下一题", variable=self.auto_next_var,
+            style="Choice.TCheckbutton",
+            command=lambda: setattr(self.cfg, "auto_next",
+                                    self.auto_next_var.get()) or self.cfg.save())
+        self.auto_next_check.pack(side="right", padx=(0, 8))
         self.mark_btn = tk.Button(meta, text="☆ 标记本题", command=self.toggle_mark,
                                   font=(FONT, 10), padx=10, pady=2,
                                   relief="flat", bg=LINE_2, cursor="hand2")
@@ -1908,6 +1934,11 @@ class App:
             w.destroy()
 
         qt = q["qtype"]
+        self._cancel_auto_next()
+        if qt in ("single", "judge"):
+            self.auto_next_check.pack(side="right", padx=(0, 8))
+        else:
+            self.auto_next_check.pack_forget()
         saved = self.sheet.get(q["id"])
         self.vars["_opt_boxes"] = []      # 选项外框（选中态高亮用）
 
@@ -2259,6 +2290,15 @@ class App:
         tags = [t for t, bv in self.vars.get("_multi", []) if bv.get()]
         self.save_current("".join(tags))
 
+    def _cancel_auto_next(self):
+        if self._auto_next_job is None:
+            return
+        try:
+            self.root.after_cancel(self._auto_next_job)
+        except tk.TclError:
+            pass
+        self._auto_next_job = None
+
     def save_current(self, value):
         """
         学生改答案 → 只写本地 + 打脏标记，不联网。
@@ -2271,6 +2311,18 @@ class App:
         self.sheet.set(q["id"], value)
         self.refresh_card()
         self.client.queue_answers({str(q["id"]): value})
+        if (self.cfg.auto_next and q.get("qtype") in ("single", "judge")
+                and str(value or "").strip()):
+            self._cancel_auto_next()
+            self._auto_next_job = self.root.after(650, self._auto_next_question)
+
+    def _auto_next_question(self):
+        self._auto_next_job = None
+        if (self._current_page() != "exam" or not self.sheet
+                or self.client.state.get("submitting")
+                or self.client.state.get("submitted")):
+            return
+        self.next_q()
 
     def _on_answers_saved(self, n=0):
         """批量同步成功（后台线程）→ 更新「答案已保存 时:分:秒」"""
@@ -2399,38 +2451,46 @@ class App:
             只做网络/文件操作（交卷 + 写日志）。
         理论题 + 全部实操题（没做的按缺卷 0 分）+ 打字统计。
         """
+        ok = True
         try:
             eid = self.exam_id or exam_id
             if self.sheet and self.sheet.total() and eid:
-                try:
-                    self.client.flush_answers()
-                except Exception:
-                    pass
-                try:
-                    self.client.api.submit_theory(eid, self.sheet.payload())
-                    self.client.api.finish_theory(eid)
-                    self._log_only("强制交卷：理论题已交")
-                except Exception as e:
-                    self._log_only(f"强制交卷：理论题失败 {e}")
-            try:
-                self.client.flush_typing()
-            except Exception:
-                pass
+                if self.client.flush_answers() is False:
+                    ok = False
+                result = self.client.api.submit_theory(eid, self.sheet.payload())
+                if not result.get("ok"):
+                    ok = False
+                    self._log_only(f"强制交卷：理论题失败 {result.get('msg')}")
+                else:
+                    result = self.client.api.finish_theory(eid)
+                    if not result.get("ok"):
+                        ok = False
+                        self._log_only(f"强制交卷：理论题交卷失败 {result.get('msg')}")
+                    else:
+                        self._log_only("强制交卷：理论题已交")
+            if self.client.flush_typing() is False:
+                ok = False
+                self._log_only("强制交卷：打字统计提交失败")
             # 画板作品：强制收卷也带上最新一版
-            self._upload_drawing_quiet(eid)
+            if self._upload_drawing_quiet(eid) is False:
+                ok = False
             for t in (self.client.practice_tasks() or []):
                 try:
-                    ok, info = self.client.auto_submit(t, allow_empty=True)
-                    if ok and (info or {}).get("empty"):
+                    done, info = self.client.auto_submit(t, allow_empty=True)
+                    if done and (info or {}).get("empty"):
                         self._log_only(f"强制交卷：{t.get('name')} 没做，按缺卷 0 分")
-                    elif ok:
+                    elif done:
                         self._log_only(f"强制交卷：{t.get('name')} 已交")
                     else:
+                        ok = False
                         self._log_only(f"强制交卷：{t.get('name')} 失败 {info}")
                 except Exception as e:
+                    ok = False
                     self._log_only(f"强制交卷：{t.get('name')} 出错 {e}")
         except Exception as e:
+            ok = False
             self._log_only(f"强制交卷出错: {e}")
+        return ok
 
     def submit_all(self):
         """
@@ -2508,8 +2568,12 @@ class App:
                 return
 
             def up_theory(p=payload):
-                self.client.api.submit_theory(self.exam_id, p)
-                self.client.api.finish_theory(self.exam_id)
+                result = self.client.api.submit_theory(self.exam_id, p)
+                if not result.get("ok"):
+                    raise RuntimeError(result.get("msg") or "理论题提交失败")
+                result = self.client.api.finish_theory(self.exam_id)
+                if not result.get("ok"):
+                    raise RuntimeError(result.get("msg") or "理论题交卷失败")
                 return "已提交"
             jobs.append(("理论题答案", up_theory))
         if self.client.typing_config():
@@ -2733,7 +2797,11 @@ class App:
             pass
         try:
             r = self.client.api.submit_theory(self.exam_id, self.sheet.payload())
-            self.client.api.finish_theory(self.exam_id)
+            if not r.get("ok"):
+                raise RuntimeError(r.get("msg") or "理论题提交失败")
+            r = self.client.api.finish_theory(self.exam_id)
+            if not r.get("ok"):
+                raise RuntimeError(r.get("msg") or "理论题交卷失败")
             if not quiet:
                 messagebox.showinfo(
                     "已交卷",

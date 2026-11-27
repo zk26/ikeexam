@@ -113,6 +113,7 @@ class Config:
         self.passwordless = False
         self.work_dir = WORK_ROOT
         self.auto_discover = True
+        self.auto_next = False
         # 窗口形态
         #   normal（默认）  普通窗口：能拖动、缩放、最小化、随时关闭，
         #                   和别的软件一样。老师要求不要全屏。
@@ -141,6 +142,7 @@ class Config:
                 self.logged_in = bool(d.get("logged_in", False))
                 self.passwordless = bool(d.get("passwordless", False))
                 self.auto_discover = bool(d.get("auto_discover", True))
+                self.auto_next = bool(d.get("auto_next", False))
                 # work_dir：如果配置的路径不可用，用新的默认路径
                 saved_wd = d.get("work_dir", "")
                 if saved_wd and os.path.isdir(saved_wd):
@@ -172,6 +174,7 @@ class Config:
                        "passwordless": self.passwordless,
                        "work_dir": self.work_dir,
                        "auto_discover": self.auto_discover,
+                       "auto_next": self.auto_next,
                        "window_mode": self.window_mode},
                        f, ensure_ascii=False, indent=2)
 
@@ -931,6 +934,7 @@ class ExamClient:
         # 老师结束考试时的「强制交卷」回调（GUI 设置，走它交卷最稳：
         # GUI 知道当前有哪些题、哪些已经交过）
         self.on_force_submit = None
+        self._force_submit_ok = True
         self._seen_commands = set()
 
     # ---------- 答案同步（理论题）----------
@@ -1298,22 +1302,23 @@ class ExamClient:
         self._typing_rep = t
 
     def flush_typing(self):
-        """把打字统计里已经有进度的任务报给服务端"""
+        """把打字统计里已经有进度的任务报给服务端，返回是否成功。"""
         keys = ("task", "progress", "total", "hits", "typed", "correct_chars",
                 "elapsed_ms", "wpm", "accuracy", "reaction_ms", "finished")
         try:
             st = self.typing_state()
             if not st.get("exam_id"):
-                return
+                return True
             reports = []
             for v in (st.get("stats") or {}).values():
                 if not (v.get("finished") or v.get("progress") or v.get("typed")):
                     continue
                 reports.append({k: v.get(k) for k in keys})
-            if reports:
-                self.api.typing_report(st["exam_id"], reports)
+            if not reports:
+                return True
+            return bool(self.api.typing_report(st["exam_id"], reports).get("ok"))
         except Exception:
-            pass
+            return False
 
     # ---------- 实操题清单 ----------
     def practice_tasks(self):
@@ -1380,26 +1385,32 @@ class ExamClient:
         self._log("warn", "收到结束考试指令：强制交卷并退出"
                           + ("（清除登录信息）" if clear_login else "（保留登录信息）"))
         # 1) 尽力交卷：理论题 + 每道实操题（没做的按缺卷 0 分）+ 打字统计
+        self._force_submit_ok = True
         try:
             ex = self.state.get("exam") or {}
             eid = ex.get("id")
             on_force = getattr(self, "on_force_submit", None)
             if eid and on_force:
-                on_force(eid)
+                if on_force(eid) is False:
+                    self._force_submit_ok = False
             elif eid:
                 try:
-                    self.flush_answers()
+                    if self.flush_answers() is False:
+                        self._force_submit_ok = False
                 except Exception:
-                    pass
+                    self._force_submit_ok = False
                 for _t in (self.practice_tasks() or [None]):
                     try:
-                        self.auto_submit(_t, allow_empty=True)
+                        ok, _info = self.auto_submit(_t, allow_empty=True)
+                        if not ok:
+                            self._force_submit_ok = False
                     except Exception:
-                        pass
+                        self._force_submit_ok = False
                 try:
-                    self.flush_typing()
+                    if self.flush_typing() is False:
+                        self._force_submit_ok = False
                 except Exception:
-                    pass
+                    self._force_submit_ok = False
         except Exception as e:
             self._log("error", f"结束前交卷失败: {e}")
 
@@ -1431,10 +1442,12 @@ class ExamClient:
         """主线程：显示结束提示后关闭客户端"""
         try:
             import tkinter.messagebox as _mb
-            _mb.showinfo(
-                "考试已结束",
-                "老师已结束考试，你的答卷已提交。\n\n"
-                "客户端现在关闭，可以安静地离开座位了。")
+            message = ("老师已结束考试，你的答卷已提交。\n\n"
+                       "客户端现在关闭，可以安静地离开座位了。")
+            if not getattr(self, "_force_submit_ok", True):
+                message = ("老师已结束考试，但部分答卷未能提交。\n\n"
+                           "请留在座位并联系老师处理，客户端现在关闭。")
+            _mb.showinfo("考试已结束", message)
         except Exception:
             pass
         try:

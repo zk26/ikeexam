@@ -1949,10 +1949,10 @@ def add_participant(exam_id, hostname, name=None, seat=None, ip=None):
                    (exam_id, hostname, name, seat, ip, first_seen, last_seen)
                  VALUES(?,?,?,?,?,?,?)
                  ON CONFLICT(exam_id, hostname, name) DO UPDATE SET
-                   seat=CASE WHEN excluded.seat!='' THEN excluded.seat
-                             ELSE exam_participants.seat END,
-                   ip=CASE WHEN excluded.ip!='' THEN excluded.ip
-                           ELSE exam_participants.ip END,
+                   seat=CASE WHEN exam_participants.seat='' AND excluded.seat!=''
+                             THEN excluded.seat ELSE exam_participants.seat END,
+                   ip=CASE WHEN exam_participants.ip='' AND excluded.ip!=''
+                           THEN excluded.ip ELSE exam_participants.ip END,
                    last_seen=excluded.last_seen""",
               (exam_id, hostname, name, seat, ip, t, t))
     row = c.execute("""SELECT id FROM exam_participants
@@ -1961,6 +1961,15 @@ def add_participant(exam_id, hostname, name=None, seat=None, ip=None):
     c.commit()
     c.close()
     return row["id"] if row else 0
+
+
+def snapshot_exam_students(exam_id):
+    """结束前把当前考生身份写入本场快照，之后换学生不覆盖历史成绩。"""
+    for student in list_students():
+        if (student.get("exam_id") or 0) == int(exam_id) and (student.get("name") or "").strip():
+            add_participant(exam_id, student.get("hostname") or "",
+                            student.get("name") or "", student.get("seat") or "",
+                            student.get("ip") or "")
 
 
 def touch_participant(exam_id, hostname, status=None):
@@ -2463,7 +2472,8 @@ def ensure_practice_type(exam_id):
 
 def _sync_exam_legacy(exam_id):
     """
-    把「第一道实操题」同步到 exams 表的旧字段（materials/checks/...）。
+    把「第一道实操题」同步到 exams 表的旧字段（requirement/checks/...）。
+    素材以考试级配置为准，不再把实操题素材复制成考试素材，避免重复显示。
 
     为什么还要同步：老客户端只认单题模式，这样即使装了多道，
     老版本学生端也能正常做第一道，不会白屏。
@@ -2478,20 +2488,19 @@ def _sync_exam_legacy(exam_id):
         return
     t = tasks[0]
     c = conn()
-    cur = c.execute("SELECT etype FROM exams WHERE id=?", (exam_id,)).fetchone()
+    cur = c.execute("SELECT etype, materials FROM exams WHERE id=?", (exam_id,)).fetchone()
     raw = ((cur["etype"] if cur else "") or "").strip()
+    materials = (cur["materials"] if cur else None) or "[]"
     if raw:
         c.execute("""UPDATE exams SET requirement=?, materials=?,
                      save_as=?, checks=? WHERE id=?""",
-                  (t["requirement"],
-                   json.dumps(t["materials"], ensure_ascii=False), t["save_as"],
-                   json.dumps(t["checks"], ensure_ascii=False), exam_id))
+                  (t["requirement"], materials,
+                   t["save_as"], json.dumps(t["checks"], ensure_ascii=False), exam_id))
     else:
         c.execute("""UPDATE exams SET etype=?, requirement=?, materials=?,
                      save_as=?, checks=? WHERE id=?""",
                   (json.dumps([t["etype"]], ensure_ascii=False),
-                   t["requirement"],
-                   json.dumps(t["materials"], ensure_ascii=False), t["save_as"],
+                   t["requirement"], materials, t["save_as"],
                    json.dumps(t["checks"], ensure_ascii=False), exam_id))
     c.commit()
     c.close()

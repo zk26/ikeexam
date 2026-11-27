@@ -15,6 +15,11 @@
   <div class="head-actions">
     <a class="btn ghost" href="/">← 返回控制台</a>
     <a class="btn ghost" href="/exam/{{ exam.id }}/export">导出考试包</a>
+    <form method="post" action="/exam/{{ exam.id }}/copy" style="display:flex">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <button type="submit" class="btn orange sm"
+              onclick="return confirm('复制为一场新的未开始考试？源考试的题目、素材和成绩都不会改动。')">复制为草稿</button>
+    </form>
   </div>
 </div>
 
@@ -29,17 +34,47 @@
 {% if type_tabs.items.append(('practice','实操')) %}{% endif %}
 {% if type_tabs.items.append(('typing','打字')) %}{% endif %}
 {% if type_tabs.items.append(('drawing','画板')) %}{% endif %}
+{% if type_tabs.items.append(('overview','总览')) %}{% endif %}
 {% set selected_qids = qs | map(attribute='id') | list %}
+{% set question_counts = namespace(single=0, multi=0, judge=0, blank=0, drag=0, code=0) %}
+{% for q in qs %}
+  {% if q.qtype == 'single' %}{% set question_counts.single = question_counts.single + 1 %}
+  {% elif q.qtype == 'multi' %}{% set question_counts.multi = question_counts.multi + 1 %}
+  {% elif q.qtype == 'judge' %}{% set question_counts.judge = question_counts.judge + 1 %}
+  {% elif q.qtype == 'blank' %}{% set question_counts.blank = question_counts.blank + 1 %}
+  {% elif q.qtype == 'drag' %}{% set question_counts.drag = question_counts.drag + 1 %}
+  {% elif q.qtype == 'code' %}{% set question_counts.code = question_counts.code + 1 %}{% endif %}
+{% endfor %}
+{% set typing_enabled_n = typing_cfg.values() | selectattr('enabled') | list | length %}
+{# 实操题自带素材随题目下发，不重复列入「额外考试素材」。 #}
+{% set task_material_names = [] %}
+{% for t in tasks %}
+  {% for m in t.materials or [] %}
+    {% if m not in task_material_names %}{% if task_material_names.append(m) %}{% endif %}{% endif %}
+  {% endfor %}
+{% endfor %}
+{% set raw_materials = json.loads(exam.materials or '[]') %}
+{% set extra_materials = [] %}
+{% if raw_materials is sequence and raw_materials is not string %}
+  {% for m in raw_materials %}
+    {% if m not in task_material_names %}{% if extra_materials.append(m) %}{% endif %}{% endif %}
+  {% endfor %}
+{% endif %}
 {% set all_keys = [] %}
 {% for k, l in type_tabs.items %}{% if all_keys.append(k) %}{% endif %}{% endfor %}
 {% set active = active_tab if active_tab in all_keys else 'basic' %}
 
-{% if exam.status in ('running', 'paused') %}
-<div class="note warn">
-  <b>这场考试{{ '已暂停' if exam.status == 'paused' else '正在进行中' }}，配置已锁定。</b>
+{% if exam.status in ('running', 'paused', 'stopped') %}
+<div class="note {{ 'warn' if exam.status != 'stopped' else '' }}">
+  <b>这场考试{{ '已结束' if exam.status == 'stopped' else '已暂停' if exam.status == 'paused' else '正在进行中' }}，配置已锁定。</b>
+  {% if exam.status == 'stopped' %}
+  已结束考试为只读，只能查看、评讲和导出，不能编辑或删除。需要再考时可点「复制为草稿」，
+  系统会创建一场独立的未开始考试，<b>不会改动源考试</b>。
+  {% else %}
   现在改题目、时长或素材，会让学生手里的卷子和服务器对不上，所以先不让你改。
-  要调整请回控制台点「结束考试」，考完再改。
+  要调整请点「复制为草稿」，在副本中修改；源考试保持不变。
   <br>考试期间照常可用：看成绩、重新评分、打印成绩单、投「大屏」。
+  {% endif %}
 </div>
 {% endif %}
 
@@ -51,10 +86,10 @@
 <!-- 标签页导航（全部题型都在这里；绿点 = 这场考它） -->
 <div class="tabbar" id="tab-nav" role="tablist" aria-label="考试配置分类">
   {% for k, l in type_tabs.items %}
-  <button type="button" class="tab-btn{% if k == active %} active{% endif %}" data-tab="{{ k }}"
+  <button type="button" class="tab-btn{% if k == active %} active{% endif %}{% if k in sel_types %} on{% endif %}" data-tab="{{ k }}"
           role="tab" id="tab-btn-{{ k }}" aria-controls="tab-{{ k }}"
           aria-selected="{{ 'true' if k == active else 'false' }}"
-          onclick="showTab('{{ k }}')">{{ l }}<span class="dot" title="这场考试考这个题型"></span><span class="dirty-note">待保存</span></button>
+          onclick="showTab('{{ k }}')">{{ l }}<span class="tab-count">{{ question_counts[k] if k in ['single','multi','judge','blank','drag','code'] else tasks|length if k == 'practice' else typing_enabled_n if k == 'typing' else drawing_cfg.styles|length if k == 'drawing' else qs|length + tasks|length }}</span>{% if k in sel_types %}<span class="dot" title="这场考试考这个题型"></span>{% endif %}<span class="dirty-note">待保存</span></button>
   {% endfor %}
 </div>
 <p class="muted" style="margin:-10px 0 16px">
@@ -69,15 +104,18 @@
          font:800 .875rem var(--font);box-shadow:3px 3px 0 var(--navy);
          transition:background var(--t),transform var(--t),box-shadow var(--t)}
 .tab-btn:hover{background:var(--sky)}
-.tab-btn.active{background:var(--green);color:var(--navy);transform:translateY(2px);
+.tab-btn.active{background:var(--lavender);color:var(--navy);transform:translateY(2px);
                 box-shadow:1px 1px 0 var(--navy)}
 .tab-btn.active::after{content:"";position:absolute;left:12px;right:12px;bottom:3px;
-       height:2px;background:var(--navy);border-radius:2px}
+       height:3px;background:var(--purple);border-radius:2px}
 @keyframes tabIn{from{transform:scaleX(.4);opacity:0}
                  to{transform:scaleX(1);opacity:1}}
 .tab-btn .dot{display:none;width:8px;height:8px;border-radius:50%;
               background:var(--green);margin-left:6px;vertical-align:middle;
               box-shadow:0 0 0 2px var(--green-l)}
+.tab-btn .tab-count{display:inline-block;min-width:24px;margin-left:6px;padding:1px 6px;
+              border:1.5px solid var(--navy);border-radius:999px;background:var(--cream);
+              color:var(--navy);font-size:11px;line-height:18px;text-align:center}
 .tab-btn.on .dot{display:inline-block;animation:fadeUp .2s ease both}
 .tab-btn .dirty-note{display:none;margin-left:6px;font-size:11px;font-weight:600}
 .tab-btn.dirty{background:var(--coral);color:var(--navy)}
@@ -102,15 +140,68 @@
 tr.pending-remove td{text-decoration:line-through;background:var(--red-l)}
 .exam-scroll{overscroll-behavior:auto;scrollbar-gutter:stable}
 .exam-scroll:focus{outline:3px solid var(--navy);outline-offset:3px}
+.picker-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(310px,.85fr);
+               gap:16px;align-items:start}
+.picker-panel{min-width:0;padding:14px;border:2px solid var(--navy);border-radius:12px;
+              background:var(--white);box-shadow:3px 3px 0 var(--navy)}
+.picker-panel h3{margin:0 0 10px;font-size:15px}
+.picker-panel.selected-panel{background:var(--sky)}
+.selected-question-list{max-height:520px;overflow:auto;overscroll-behavior:auto}
+.selected-question-row{display:grid;grid-template-columns:28px 54px minmax(0,1fr) auto;
+               gap:8px;align-items:start;padding:9px 4px;border-bottom:1px dashed var(--line)}
+.selected-question-row:last-child{border-bottom:0}
+.selected-question-row .seq{font-weight:800;color:var(--brand)}
+.selected-question-row .stem{overflow-wrap:anywhere;line-height:1.55}
+.selected-question-row.pending-remove{opacity:.5;text-decoration:line-through}
+.question-actions{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.question-actions .btn{min-height:32px;padding:4px 8px}
+.picker-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+.picker-tools input,.picker-tools select{min-height:38px}
+.material-check{width:18px!important;height:18px!important;min-width:18px!important}
+.drag-editor{border:2px solid var(--navy);border-radius:16px;padding:0;width:min(920px,94vw);
+              max-height:90vh;background:var(--cream);color:var(--navy);box-shadow:8px 8px 0 var(--navy)}
+.drag-editor::backdrop{background:rgba(39,50,74,.48)}
+.drag-editor-head{display:flex;justify-content:space-between;align-items:center;gap:12px;
+                  padding:16px 20px;border-bottom:2px solid var(--navy);background:var(--lavender)}
+.drag-editor-body{padding:20px;overflow:auto;max-height:calc(90vh - 150px)}
+.drag-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.drag-editor-grid label{display:block;font-weight:700;margin-bottom:5px}
+.drag-editor-grid input,.drag-editor-grid select,.drag-editor-grid textarea{width:100%}
+.drag-preview{display:flex;gap:12px;align-items:stretch;margin-top:14px;padding:14px;
+              border:2px dashed var(--navy);border-radius:12px;background:var(--white);overflow:auto}
+.drag-preview-items{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:120px}
+.drag-preview-slots{display:grid;grid-template-columns:repeat(2,minmax(110px,1fr));gap:8px;flex:1}
+.drag-preview.horizontal{flex-direction:column}
+.drag-preview.horizontal .drag-preview-slots{display:flex;flex-wrap:wrap}
+.drag-chip{padding:7px 10px;border:2px solid var(--navy);border-radius:8px;background:var(--sky);
+           font-weight:700;white-space:nowrap}
+.drag-preview.horizontal .drag-chip{background:var(--mint)}
+.drag-preview.horizontal .drag-chip+.drag-chip::before{content:"→";margin-right:8px;font-weight:800}
+@media(max-width:700px){.drag-editor-grid{grid-template-columns:1fr}.question-actions{max-width:110px}}
+.typing-task{margin:0 0 12px;padding:12px;border:2px solid var(--navy);border-radius:12px;
+             background:var(--white);box-shadow:3px 3px 0 var(--navy)}
+.typing-task>.type-on{margin:0;box-shadow:none;min-height:38px;padding:8px 10px}
+.typing-task.enabled{background:var(--sky)}
+.typing-task .typing-config{display:none;margin-top:12px}
+.typing-task.enabled .typing-config{display:block}
+.overview-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.overview-stats .stat{min-width:130px;flex:1}
+.overview-detail{width:100%;border-collapse:collapse}
+.overview-detail td,.overview-detail th{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.overview-detail .stem{overflow-wrap:anywhere}
+@media(max-width:1050px){.picker-layout{grid-template-columns:1fr}.selected-panel{order:-1}}
+@media(max-width:620px){.selected-question-row{grid-template-columns:24px 44px minmax(0,1fr) auto}}
 .bottom-actions[hidden]{display:none!important}
 </style>
 
-<form method="post" enctype="multipart/form-data" id="examForm">
+<form method="post" enctype="multipart/form-data" id="examForm" onsubmit="return !CONFIG_LOCKED">
 <input type="hidden" name="_csrf" value="{{ csrf_token }}">
 <input type="hidden" name="tab" id="currentTab" value="{{ active }}">
+<fieldset id="configFields" {% if config_locked %}disabled{% endif %}
+          style="border:0;padding:0;margin:0;min-width:0">
 
 <!-- ========== 基本设置 ========== -->
-<div role="tabpanel" class="tab-panel active" id="tab-basic">
+<div role="tabpanel" class="tab-panel{% if active == 'basic' %} active{% endif %}" id="tab-basic">
 <div class="card">
   <h2>基本信息</h2>
   <div class="row">
@@ -193,16 +284,20 @@ tr.pending-remove td{text-decoration:line-through;background:var(--red-l)}
     <span class="tag gray" style="margin:2px">{{ r.name }}
       {% if r.seat %}<span class="muted">· {{ r.seat }}</span>{% endif %}
       {% if r.ip %}<span class="muted">· {{ r.ip }}</span>{% endif %}
+      {% if not config_locked %}
       <a href="javascript:void(0)" style="margin-left:6px;color:var(--red)"
-         title="从名单里删掉" onclick="delRoster({{ r.id }})">✕</a></span>
+         title="从名单里删掉" onclick="delRoster({{ r.id }})">✕</a>
+      {% endif %}</span>
     {% endfor %}
   </div>
   {% endif %}
 </div>
 
 <script>
-var CSRF_R = '{{ csrf_token }}';
+var CSRF_R = {{ csrf_token|tojson }};
+var CONFIG_LOCKED = {{ 'true' if config_locked else 'false' }};
 function rosterPost(url, body, tip){
+  if(CONFIG_LOCKED || !tip) return;
   tip.textContent = '正在保存…';
   fetch(url, {method: 'POST',
               headers: {'Content-Type': 'application/json',
@@ -232,38 +327,6 @@ function delRoster(rid){
 }
 </script>
 
-<div class="card">
-  <h2>已选题目总览</h2>
-  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
-    {% set ns = namespace(single_n=0, multi_n=0, judge_n=0, blank_n=0, code_n=0, drag_n=0) %}
-    {% for q in qs %}
-      {% if q.qtype == 'single' %}{% set ns.single_n = ns.single_n + 1 %}
-      {% elif q.qtype == 'multi' %}{% set ns.multi_n = ns.multi_n + 1 %}
-      {% elif q.qtype == 'judge' %}{% set ns.judge_n = ns.judge_n + 1 %}
-      {% elif q.qtype == 'blank' %}{% set ns.blank_n = ns.blank_n + 1 %}
-      {% elif q.qtype == 'code' %}{% set ns.code_n = ns.code_n + 1 %}
-      {% elif q.qtype == 'drag' %}{% set ns.drag_n = ns.drag_n + 1 %}
-      {% endif %}
-    {% endfor %}
-    {% for k, n in [('single', ns.single_n), ('multi', ns.multi_n),
-                    ('judge', ns.judge_n), ('blank', ns.blank_n),
-                    ('drag', ns.drag_n), ('code', ns.code_n)] %}
-      <div class="stat" style="min-width:100px"><div class="n">{{ n }}</div>
-        <div class="t">{{ dict(qtype_tabs).get(k, k) }}</div></div>
-    {% endfor %}
-    <div class="stat" style="min-width:100px"><div class="n">{{ tasks|length }}</div><div class="t">操作题</div></div>
-    <div class="stat" style="min-width:100px"><div class="n">{{ qs|length }}</div><div class="t">理论题合计</div></div>
-    <div class="stat" style="min-width:100px"><div class="n">{{ qsum }}</div><div class="t">理论满分</div></div>
-  </div>
-  {% if qs %}
-  <div class="bar">
-    <button type="button" class="btn ghost sm"
-            onclick="submitMain('/exam/{{ exam.id }}/clearq', {}, '确定清空全部已选题目？')">
-      清空全部题目
-    </button>
-  </div>
-  {% endif %}
-</div>
 </div><!-- /tab-basic -->
 
 <!-- ========== 打字练习（小学）========== -->
@@ -277,21 +340,15 @@ function delRoster(rid){
   <div class="type-body{% if not show_typing %} off{% endif %}" id="type-body-typing">
     <div style="font-weight:600;margin-bottom:8px">打字练习设置（小学模块，只统计速度与正确率，不计分）</div>
 
-    {# 启用哪些子任务：每个都能单独开关（打地鼠 / 大写认键 / 小写找键 / 英文 / 中文 / 名字） #}
-    <div class="row" style="margin:0 0 10px;align-items:center">
-      <label class="muted" style="width:150px">考哪几个（可多选）</label>
-      {% for k, l in [('whack_mole','① 打地鼠（鼠标）'),('key_press','② 看键按键（大写）'),
-                      ('case_press','③ 小写字母找按键'),('typing_en','④ 英文打字'),
-                      ('typing_zh','⑤ 中文打字'),('name_typing','⑥ 打名字测试')] %}
-      <label class="check-chip">
-        <input type="checkbox" name="typing_enable_{{ k }}" value="1"
-               class="typing-enable" data-task="{{ k }}"
-               {% if typing_cfg[k].enabled %}checked{% endif %}>
-        {{ l }}
-      </label>
-      {% endfor %}
-    </div>
-
+    {# 每个子任务关闭时只显示开关，开启后才展开自己的配置。 #}
+    <section class="typing-task{% if typing_cfg.whack_mole.enabled %} enabled{% endif %}">
+    <label class="type-on">
+      <input type="checkbox" name="typing_enable_whack_mole" value="1"
+             class="typing-enable" data-task="whack_mole"
+             {% if typing_cfg.whack_mole.enabled %}checked{% endif %}>
+      ① 打地鼠（鼠标） — 本场考试启用
+    </label>
+    <div class="typing-config">
     <div class="row typing-cfg-row" data-task="whack_mole" style="margin:0 0 10px">
       <label class="muted" style="width:150px">① 打地鼠（鼠标）</label>
       难度
@@ -309,8 +366,8 @@ function delRoster(rid){
           只打困难关
         </option>
       </select>
-      每关冒出 <input type="text" name="typing_whack_rounds"
-                value="{{ typing_cfg.whack_mole.rounds }}" style="width:56px"> 只
+      每关冒出 <input type="number" min="1" max="50" step="1" name="typing_whack_rounds"
+                value="{{ typing_cfg.whack_mole.rounds }}" style="width:64px"> 只
       洞口
       <select name="typing_whack_grid" style="width:126px">
         {% set g = typing_cfg.whack_mole.get('grid', '3x3') %}
@@ -323,13 +380,23 @@ function delRoster(rid){
       <span class="muted">（鼠标点击练习；档位越高地鼠越小、冒出时间越短：
         简单 56px/1.8秒 → 普通 44px/1.3秒 → 困难 34px/0.9秒；洞口越多越难）</span>
     </div>
+    </div>
+    </section>
 
+    <section class="typing-task{% if typing_cfg.key_press.enabled %} enabled{% endif %}">
+    <label class="type-on">
+      <input type="checkbox" name="typing_enable_key_press" value="1"
+             class="typing-enable" data-task="key_press"
+             {% if typing_cfg.key_press.enabled %}checked{% endif %}>
+      ② 看键按键（大写） — 本场考试启用
+    </label>
+    <div class="typing-config">
     <div class="row typing-cfg-row" data-task="key_press" style="margin:0 0 6px">
       <label class="muted" style="width:150px">② 看键按键（大写）</label>
-      共 <input type="text" name="typing_key_rounds"
-                value="{{ typing_cfg.key_press.rounds }}" style="width:56px"> 轮，
-      每轮 <input type="text" name="typing_key_seconds"
-                 value="{{ typing_cfg.key_press.seconds }}" style="width:56px"> 秒
+      共 <input type="number" min="1" max="100" step="1" name="typing_key_rounds"
+                value="{{ typing_cfg.key_press.rounds }}" style="width:64px"> 轮，
+      每轮 <input type="number" min="0" max="600" step="1" name="typing_key_seconds"
+                 value="{{ typing_cfg.key_press.seconds }}" style="width:64px"> 秒
       <span class="muted">（单个按键的停顿时长，填 0 = 不限时）</span>
     </div>
     <details class="typing-cfg-row" data-task="key_press" style="margin:0 0 10px 150px">
@@ -364,13 +431,23 @@ function delRoster(rid){
       <input type="hidden" name="typing_key_pool" id="vk-value-key_press"
              value="{{ typing_cfg.key_press['keys'] | tojson }}">
     </details>
+    </div>
+    </section>
 
+    <section class="typing-task{% if typing_cfg.case_press.enabled %} enabled{% endif %}">
+    <label class="type-on">
+      <input type="checkbox" name="typing_enable_case_press" value="1"
+             class="typing-enable" data-task="case_press"
+             {% if typing_cfg.case_press.enabled %}checked{% endif %}>
+      ③ 小写字母找按键 — 本场考试启用
+    </label>
+    <div class="typing-config">
     <div class="row typing-cfg-row" data-task="case_press" style="margin:0 0 6px">
       <label class="muted" style="width:150px">③ 小写字母找按键</label>
-      共 <input type="text" name="typing_case_rounds"
-                value="{{ typing_cfg.case_press.rounds }}" style="width:56px"> 轮，
-      每轮 <input type="text" name="typing_case_seconds"
-                 value="{{ typing_cfg.case_press.seconds }}" style="width:56px"> 秒
+      共 <input type="number" min="1" max="100" step="1" name="typing_case_rounds"
+                value="{{ typing_cfg.case_press.rounds }}" style="width:64px"> 轮，
+      每轮 <input type="number" min="0" max="600" step="1" name="typing_case_seconds"
+                 value="{{ typing_cfg.case_press.seconds }}" style="width:64px"> 秒
       <span class="muted">（填 0 = 不限时）</span>
     </div>
     <details class="typing-cfg-row" data-task="case_press" style="margin:0 0 10px 150px">
@@ -395,11 +472,21 @@ function delRoster(rid){
       <input type="hidden" name="typing_case_pool" id="vk-value-case_press"
              value="{{ typing_cfg.case_press['keys'] | tojson }}">
     </details>
+    </div>
+    </section>
 
+    <section class="typing-task{% if typing_cfg.typing_en.enabled %} enabled{% endif %}">
+    <label class="type-on">
+      <input type="checkbox" name="typing_enable_typing_en" value="1"
+             class="typing-enable" data-task="typing_en"
+             {% if typing_cfg.typing_en.enabled %}checked{% endif %}>
+      ④ 英文打字 — 本场考试启用
+    </label>
+    <div class="typing-config">
     <div class="row typing-cfg-row" data-task="typing_en" style="margin:6px 0 4px">
       <label class="muted" style="width:150px">④ 英文打字</label>
-      限时 <input type="text" name="typing_en_seconds"
-                 value="{{ typing_cfg.typing_en.seconds }}" style="width:64px"> 秒
+      限时 <input type="number" min="0" max="3600" step="1" name="typing_en_seconds"
+                 value="{{ typing_cfg.typing_en.seconds }}" style="width:72px"> 秒
       <span class="muted">（填 0 = 不限时，打完或学生点「做完了」结束）</span>
       <label class="muted" style="margin-left:14px">选课文</label>
       <select id="enPreset" style="width:420px;max-width:48vw">
@@ -419,11 +506,21 @@ function delRoster(rid){
     <textarea name="typing_en_text" rows="3"
               style="width:100%;box-sizing:border-box;margin:0 0 8px"
               placeholder="英文范文（可上面选课文再截断，也可以自己粘贴）">{{ typing_cfg.typing_en.text }}</textarea>
+    </div>
+    </section>
 
+    <section class="typing-task{% if typing_cfg.typing_zh.enabled %} enabled{% endif %}">
+    <label class="type-on">
+      <input type="checkbox" name="typing_enable_typing_zh" value="1"
+             class="typing-enable" data-task="typing_zh"
+             {% if typing_cfg.typing_zh.enabled %}checked{% endif %}>
+      ⑤ 中文打字 — 本场考试启用
+    </label>
+    <div class="typing-config">
     <div class="row typing-cfg-row" data-task="typing_zh" style="margin:6px 0 4px">
       <label class="muted" style="width:150px">⑤ 中文打字</label>
-      限时 <input type="text" name="typing_zh_seconds"
-                 value="{{ typing_cfg.typing_zh.seconds }}" style="width:64px"> 秒
+      限时 <input type="number" min="0" max="3600" step="1" name="typing_zh_seconds"
+                 value="{{ typing_cfg.typing_zh.seconds }}" style="width:72px"> 秒
       <span class="muted">（填 0 = 不限时）</span>
       <label class="muted" style="margin-left:14px">选课文</label>
       <select id="zhPreset" style="width:420px;max-width:48vw">
@@ -443,14 +540,24 @@ function delRoster(rid){
     <textarea name="typing_zh_text" rows="3"
               style="width:100%;box-sizing:border-box"
               placeholder="中文范文（可上面选课文再截断，也可以自己粘贴）">{{ typing_cfg.typing_zh.text }}</textarea>
+    </div>
+    </section>
 
-    {# ===== ⑤ 打名字测试：每个学生打自己的名字（系统自动认学生，不用老师录词表） ===== #}
+    {# ===== ⑥ 打名字测试：每个学生打自己的名字 ===== #}
+    <section class="typing-task{% if typing_cfg.name_typing.enabled %} enabled{% endif %}">
+    <label class="type-on">
+      <input type="checkbox" name="typing_enable_name_typing" value="1"
+             class="typing-enable" data-task="name_typing"
+             {% if typing_cfg.name_typing.enabled %}checked{% endif %}>
+      ⑥ 打名字测试 — 本场考试启用
+    </label>
+    <div class="typing-config">
     <div class="row typing-cfg-row" data-task="name_typing" style="margin:10px 0 4px">
       <label class="muted" style="width:150px">⑥ 打名字测试</label>
-      打 <input type="text" name="typing_name_rounds"
-               value="{{ typing_cfg.name_typing.rounds }}" style="width:56px"> 遍，
-      每遍限时 <input type="text" name="typing_name_seconds"
-                   value="{{ typing_cfg.name_typing.seconds }}" style="width:56px"> 秒
+      打 <input type="number" min="1" max="30" step="1" name="typing_name_rounds"
+               value="{{ typing_cfg.name_typing.rounds }}" style="width:64px"> 遍，
+      每遍限时 <input type="number" min="0" max="600" step="1" name="typing_name_seconds"
+                   value="{{ typing_cfg.name_typing.seconds }}" style="width:64px"> 秒
       <span class="muted">（0 = 不限时；每遍 3 个回合：拼音提示 → 汉字提示 → 不给提示）</span>
     </div>
     <div class="typing-cfg-row" data-task="name_typing" style="margin:0 0 4px 150px">
@@ -506,6 +613,8 @@ function delRoster(rid){
         </div>
       </div>
     </div>
+    </div>
+    </section>
 
     <style>
       .vk-panel{margin:10px 0 6px;padding:12px;background:var(--white);
@@ -532,6 +641,7 @@ function delRoster(rid){
       var val = document.getElementById('vk-value-' + task);
       var keys = [];
       box.querySelectorAll('.vk.on').forEach(function(b){ keys.push(b.dataset.key); });
+      box.querySelectorAll('.vk').forEach(function(b){ b.setAttribute('aria-pressed', b.classList.contains('on') ? 'true' : 'false'); });
       val.value = JSON.stringify(keys);
       var c = document.getElementById('vk-count-' + task);
       if(c) c.textContent = keys.length ? ('（已选 ' + keys.length + ' 个）') : '（全部）';
@@ -565,8 +675,10 @@ function delRoster(rid){
       sel.addEventListener('change', function(){
         if(this.value === '') return;
         var p = presets[parseInt(this.value, 10)];
-        if(p && p.text){
-          document.querySelector('textarea[name="' + taName + '"]').value = p.text;
+        var ta = document.querySelector('textarea[name="' + taName + '"]');
+        if(p && p.text && ta){
+          if(ta.dataset.backup === undefined) ta.dataset.backup = ta.value;
+          ta.value = p.text;
         }
         this.value = '';
       });
@@ -584,6 +696,7 @@ function delRoster(rid){
       var ta = cropTarget(btn);
       if(!ta) return;
       var txt = ta.value;
+      if(ta.dataset.backup === undefined) ta.dataset.backup = txt;
       var s = parseInt(bar.querySelector('.crop-start').value, 10);
       var e = parseInt(bar.querySelector('.crop-end').value, 10);
       var a = isNaN(s) || s < 1 ? 1 : s;
@@ -673,46 +786,37 @@ function delRoster(rid){
   </label>
   <div class="type-body{% if type_key not in sel_types %} off{% endif %}"
        id="type-body-{{ type_key }}">
-  <h2>{{ type_label }} — 已选题目</h2>
   {% set type_qs = [] %}
   {% for q in qs if q.qtype == type_key %}{% if type_qs.append(q) %}{% endif %}{% endfor %}
-  {% if type_qs %}
-  <table>
-    <tr><th style="width:44px">#</th><th>题干</th><th style="width:96px">分类</th>
-        <th style="width:48px">分值</th><th style="width:74px">操作</th></tr>
-    {% for q in type_qs %}
-    <tr>
-      <td class="muted">{{ loop.index }}</td>
-      <td>{{ q.stem[:80] }}{% if q.qtype=='code' %}<div class="mono muted" style="font-size:11px;margin-top:2px;background:var(--line-2);padding:3px 6px;border-radius:3px">{{ (q.code or '')[:60] }}</div>{% endif %}</td>
-      <td class="muted">{{ q.category or '-' }}</td>
-      <td>{{ q.score }}</td>
-      <td><button type="button" class="btn red sm"
-                  onclick="removeTypeQuestion('{{ type_key }}', {{ q.id }}, this)">移除</button></td>
-    </tr>
-    {% endfor %}
-  </table>
-  <p class="muted" style="margin-top:8px">{{ type_qs|length }} 题，共 {{ type_qs|sum(attribute='score') }} 分</p>
-  {% else %}
-  <div class="empty">还没有{{ type_label }}，从下方题库添加。</div>
-  {% endif %}
-
-  <h2>从题库添加{{ type_label }}</h2>
+  <div class="picker-layout">
+  <div class="picker-panel">
+  <h3>全部{{ type_label }}题库</h3>
   <div class="filter">
+    <label>搜索</label>
+    <input type="search" class="f-keyword" placeholder="题干 / 分类" style="width:180px">
     <label>分类</label>
     <select class="f-cat">
       <option value="">全部分类</option>
       {# 只列出**这个题型实际有题**的分类，免得选了个空分类什么都抽不到 #}
       {% for c in cats_by_type.get(type_key, []) %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
     </select>
-    <button type="button" class="btn sm" onclick="toggleTypeAll('{{ type_key }}',true,this)">全选</button>
-    <button type="button" class="btn sm ghost" onclick="toggleTypeAll('{{ type_key }}',false,this)">取消</button>
+    <label>排序</label>
+    <select class="f-sort" style="width:132px">
+      <option value="order">选题顺序</option>
+      <option value="id">ID 升序</option>
+      <option value="category">分类名称</option>
+      <option value="score_desc">分值降序</option>
+      <option value="score_asc">分值升序</option>
+    </select>
+    <button type="button" class="btn sm" onclick="toggleTypeAll('{{ type_key }}',true,this)">全选当前</button>
+    <button type="button" class="btn sm ghost" onclick="toggleTypeAll('{{ type_key }}',false,this)">清空当前</button>
     <span class="tag info count-{{ type_key }}">已选 0 题</span>
   </div>
   <div class="scroll exam-scroll" tabindex="0" aria-label="{{ type_label }}题库，可滚动" style="max-height:380px">
   <table class="qTable-{{ type_key }}">
-    <tr><th style="width:48px">选</th><th>题干</th><th style="width:96px">分类</th><th style="width:48px">分值</th></tr>
+    <tr><th style="width:48px">选</th><th>题干</th><th style="width:96px">分类</th><th style="width:48px">分值</th>{% if type_key == 'drag' %}<th style="width:72px">编辑</th>{% endif %}</tr>
     {% for q in allq if q.qtype == type_key %}
-    <tr data-cat="{{ q.category or '' }}" data-qid="{{ q.id }}"
+    <tr data-cat="{{ q.category or '' }}" data-qid="{{ q.id }}" data-id="{{ q.id }}" data-score="{{ q.score }}"
         class="{{ 'selected' if q.id in selected_qids else '' }}">
       <td><input type="checkbox" name="qids" value="{{ q.id }}"
                  {% if q.id in selected_qids %}checked{% endif %}
@@ -720,30 +824,69 @@ function delRoster(rid){
       <td title="{{ q.stem }}">{{ q.stem[:70] }}</td>
       <td class="muted">{{ q.category or '-' }}</td>
       <td>{{ q.score }}</td>
+      {% if type_key == 'drag' %}<td><button type="button" class="btn ghost sm" onclick="openDragEditor({{ q.id }}, this)">编辑</button></td>{% endif %}
     </tr>
     {% else %}
-    <tr><td colspan="4"><div class="empty">题库中没有{{ type_label }}，请先去题库页面添加。</div></td></tr>
+    <tr><td colspan="{{ 5 if type_key == 'drag' else 4 }}"><div class="empty">题库中没有{{ type_label }}，请先去题库页面添加。</div></td></tr>
     {% endfor %}
   </table>
   </div>
+  </div><!-- /全部题库 -->
+  <div class="picker-panel selected-panel">
+    <h3>已选{{ type_label }} <span class="tag info selected-total-{{ type_key }}">{{ type_qs|length }} 题</span></h3>
+    <p class="muted" style="margin:0 0 8px">按下面的顺序组卷；用上移 / 下移或「重排已选」排序，移除后点底部「保存选题」生效。</p>
+    <input type="hidden" name="qids_order_{{ type_key }}" id="qids-order-{{ type_key }}"
+           value="{{ type_qs | map(attribute='id') | join(',') }}">
+    <div class="selected-question-list" id="selected-list-{{ type_key }}">
+      {% for q in type_qs %}
+      <div class="selected-question-row" data-qid="{{ q.id }}" data-score="{{ q.score }}">
+        <span class="seq">{{ loop.index }}</span>
+        <span class="tag gray">{{ q.score }} 分</span>
+        <span class="stem">{{ q.stem }}{% if q.qtype == 'code' %}<div class="mono muted" style="font-size:11px;margin-top:3px">{{ (q.code or '')[:80] }}</div>{% endif %}</span>
+        <div class="question-actions">
+          <button type="button" class="btn ghost sm" aria-label="上移" onclick="moveTypeQuestion('{{ type_key }}', {{ q.id }}, -1, this)">↑</button>
+          <button type="button" class="btn ghost sm" aria-label="下移" onclick="moveTypeQuestion('{{ type_key }}', {{ q.id }}, 1, this)">↓</button>
+          {% if type_key == 'drag' %}<button type="button" class="btn ghost sm" onclick="openDragEditor({{ q.id }}, this)">编辑</button>{% endif %}
+          <button type="button" class="btn red sm" aria-label="移除题目"
+                  onclick="removeTypeQuestion('{{ type_key }}', {{ q.id }}, this)">移除</button>
+        </div>
+      </div>
+      {% endfor %}
+      {% for q in allq if q.qtype == type_key and q.id not in selected_qids %}
+      <div class="selected-question-row" data-qid="{{ q.id }}" data-score="{{ q.score }}" style="display:none">
+        <span class="seq"></span><span class="tag gray">{{ q.score }} 分</span>
+        <span class="stem">{{ q.stem }}</span>
+        <div class="question-actions">
+          <button type="button" class="btn ghost sm" aria-label="上移" onclick="moveTypeQuestion('{{ type_key }}', {{ q.id }}, -1, this)">↑</button>
+          <button type="button" class="btn ghost sm" aria-label="下移" onclick="moveTypeQuestion('{{ type_key }}', {{ q.id }}, 1, this)">↓</button>
+          {% if type_key == 'drag' %}<button type="button" class="btn ghost sm" onclick="openDragEditor({{ q.id }}, this)">编辑</button>{% endif %}
+          <button type="button" class="btn red sm" aria-label="移除题目"
+                  onclick="removeTypeQuestion('{{ type_key }}', {{ q.id }}, this)">移除</button>
+        </div>
+      </div>
+      {% endfor %}
+      <div class="empty selected-empty-{{ type_key }}"{% if type_qs %} style="display:none"{% endif %}>还没有选择{{ type_label }}。</div>
+    </div>
+  </div><!-- /已选题目 -->
+  </div><!-- /picker-layout -->
   <div class="bar">
-    <input type="text" id="n-{{ type_key }}" value="10" style="width:56px"
+    {% if type_key == 'drag' %}<button type="button" class="btn purple" onclick="openDragEditor(0, this)">新建拖拽题</button>{% endif %}
+    <button type="button" class="btn ghost" onclick="sortSelectedQuestions('{{ type_key }}')">重排已选</button>
+    <input type="number" min="1" max="200" step="1" id="n-{{ type_key }}" value="10" style="width:72px"
            title="随机抽几题">
     {# 随机抽题 / 全选会先保存当前待保存勾选，再立即写入，不会丢掉其他题型 #}
     <button type="button" class="btn"
             onclick="submitMain('/exam/{{ exam.id }}/random',
-                      {qtype:'{{ type_key }}', tab:'{{ type_key }}',
-                       selection_present:1, category: catOf(this),
+                      {qtype:'{{ type_key }}', selection_present:1, category: catOf(this),
                        n: document.getElementById('n-{{ type_key }}').value})">
       随机抽题（立即保存）
     </button>
     <button type="button" class="btn orange"
             onclick="submitMain('/exam/{{ exam.id }}/addall',
-                      {qtype:'{{ type_key }}', tab:'{{ type_key }}',
-                       selection_present:1, category: catOf(this)})">
-      全选该题型（立即保存）
+                      {qtype:'{{ type_key }}', selection_present:1, category: catOf(this)})">
+      加入当前分类全部（立即保存）
     </button>
-    <span class="muted">修改勾选后请点页面底部「保存选题」；随机抽题和全选会立即保存。</span>
+    <span class="muted">修改勾选后请点页面底部「保存选题」；随机抽题和批量加入会立即保存。</span>
   </div>
   </div><!-- /type-body -->
 </div><!-- /card -->
@@ -783,7 +926,11 @@ function delRoster(rid){
     <b>一场考试可以装多道操作题</b>，学生端会一道一道让你做。
     有「<b>一级·入门</b>」的简单题，也有「二级」的进阶题。
   </p>
+  {% if config_locked %}
+  <span class="btn gray" style="cursor:not-allowed">配置已锁定，不能挑选实操题</span>
+  {% else %}
   <a class="btn green" href="/practice?to={{ exam.id }}">打开实操题库挑选（可加多道）</a>
+  {% endif %}
 </div>
 
 {% if tasks %}
@@ -799,9 +946,11 @@ function delRoster(rid){
       <td>{{ type_name.get(t.etype, t.etype) }}</td>
       <td class="muted">{{ t.materials|join('、') }}</td>
       <td>
+        {% if not config_locked %}
         <button type="button" class="btn red sm"
                 onclick="submitMain('/exam/{{ exam.id }}/deltask/{{ t.id }}', {},
                         '把这套操作题从本场考试移除？')">移除</button>
+        {% else %}<span class="muted">只读</span>{% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -819,58 +968,100 @@ function delRoster(rid){
 
 <div class="card">
   <h2>素材文件</h2>
+  <p class="muted" style="margin:-6px 0 12px">
+    这里只列<b>额外通用素材</b>；已选实操题自带的素材随题目自动下发，不重复列出。
+    勾选素材后可批量删除，未勾选表示保留。
+  </p>
   <div class="row">
     <input type="file" name="material">
-    <span class="muted">上传后学生端可下载</span>
+    <span class="muted">选择文件后点底部「保存全部设置」上传；上传后学生端可下载。</span>
   </div>
-  {% if exam.materials %}
+  {% if extra_materials %}
   <table>
-    <tr><th>文件名</th><th style="width:90px">操作</th></tr>
-    {% for m in json.loads(exam.materials) %}
+    <tr><th style="width:64px">选择</th><th>文件名</th><th style="width:90px">操作</th></tr>
+    {% for m in extra_materials %}
     <tr>
+      <td><input type="checkbox" class="material-check" value="{{ m }}" aria-label="选择素材 {{ m }}"></td>
       <td class="mono">{{ m }}</td>
-      <td><button type="button" class="btn red sm"
-                  onclick="submitMain('/exam/{{ exam.id }}/material/del/{{ m|urlencode }}', {},
-                          '删除素材文件「{{ m }}」？学生将无法下载')">删除</button></td>
+      <td>{% if not config_locked %}<button type="button" class="btn red sm" data-material="{{ m }}"
+                  onclick="deleteMaterialNames([this.dataset.material], this)">删除</button>{% else %}<span class="muted">只读</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </table>
+  <div class="bar">
+    <button type="button" class="btn red sm" onclick="deleteSelectedMaterials(this)">删除所选素材</button>
+    <span class="muted">删除只从本场考试移除；其他考试仍在使用的素材文件会保留。</span>
+  </div>
+  {% else %}
+  <div class="empty">没有额外通用素材。实操题自带素材不需要在这里重复添加。</div>
+  {% endif %}
+  {% if task_material_names %}
+  <p class="muted" style="margin:10px 0 0">已随实操题下发：{{ task_material_names|join('、') }}（{{ task_material_names|length }} 个）。</p>
   {% endif %}
 </div>
 
-<div class="card">
-  <div class="section-head">
-    <div>
-      <h2>评分规则</h2>
-      <p class="muted">每张卡片是一个评分点，可增删、排序，无需编写 JSON。</p>
-    </div>
-    <div class="bar" style="margin:0">
-      <span class="tag info" id="ruleTotal">总分 0</span>
-      <button class="btn ghost sm" type="button" id="addRule">＋ 添加评分点</button>
-    </div>
-  </div>
-  <input type="hidden" name="checks" id="checksData" value="[]">
-  <div id="ruleEditor" class="rule-editor"></div>
-  <div class="row" style="margin-top:16px">
-    <button class="btn orange" type="button"
-            onclick="submitWithFile('/exam/{{ exam.id }}/autorule',
-                     '用上传的标准答案覆盖当前规则？')">
-      用标准答案自动生成规则
-    </button>
-    <input type="file" name="answer" accept=".docx,.xlsx,.pptx">
-    <a class="btn ghost sm" href="/exam/{{ exam.id }}/rule">下载当前规则</a>
-  </div>
-</div>
+{# 旧考试可能有考试级 checks；不再提供可视化编辑，但原样随表单保存，避免升级后丢分。 #}
+<input type="hidden" name="checks" id="checksData" value="{{ checks_list | tojson }}">
 </div><!-- /tab-practice -->
+
+<!-- ========== 总览 ========== -->
+<div role="tabpanel" class="tab-panel{% if active == 'overview' %} active{% endif %}" id="tab-overview">
+<div class="card">
+  <h2>本场考试总览</h2>
+  <div class="overview-stats">
+    <div class="stat"><div class="n">{{ qs|length }}</div><div class="t">理论题数</div></div>
+    <div class="stat"><div class="n">{{ practice_n }}</div><div class="t">实操题数</div></div>
+    <div class="stat"><div class="n">{{ qsum }}</div><div class="t">理论满分</div></div>
+    <div class="stat"><div class="n">{{ practice_full }}</div><div class="t">实操满分</div></div>
+    <div class="stat"><div class="n">{{ total_full }}</div><div class="t">总分</div></div>
+  </div>
+  <p class="muted">{% if config_locked %}当前为只读模式，不能移除试题。{% else %}这里可以直接移除试题；移除后立即从本场考试试卷中删除，题库中的原题不受影响。{% endif %}打字、画板只统计过程，不计入总分。</p>
+</div>
+<div class="card">
+  <h2>理论试题明细（{{ qs|length }} 题 / {{ qsum }} 分）</h2>
+  {% if qs %}
+  <table class="overview-detail">
+    <thead><tr><th style="width:50px">#</th><th style="width:90px">题型</th><th>题干</th><th style="width:70px">分值</th><th style="width:80px">操作</th></tr></thead>
+    <tbody>
+    {% for q in qs %}
+      <tr><td>{{ loop.index }}</td><td>{{ qtype_cn.get(q.qtype, q.qtype) }}</td>
+        <td class="stem">{{ q.stem }}</td><td>{{ q.score }}</td>
+        <td>{% if not config_locked %}<button type="button" class="btn red sm"
+          onclick="submitMain('/exam/{{ exam.id }}/delq/{{ q.id }}', {}, '从总览移除这道理论题？')">移除</button>{% else %}<span class="muted">只读</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">还没有选择理论试题。</div>{% endif %}
+</div>
+<div class="card">
+  <h2>实操试题明细（{{ practice_n }} 道 / {{ practice_full }} 分）</h2>
+  {% if tasks %}
+  <table class="overview-detail">
+    <thead><tr><th style="width:50px">#</th><th>题目</th><th style="width:100px">类型</th><th style="width:90px">满分</th><th style="width:80px">操作</th></tr></thead>
+    <tbody>
+    {% for t in tasks %}
+      <tr><td>{{ loop.index }}</td><td>{{ t.name }}</td><td>{{ type_name.get(t.etype, t.etype) }}</td>
+        <td>{{ checks_total(t.checks) }}</td>
+        <td>{% if not config_locked %}<button type="button" class="btn red sm"
+          onclick="submitMain('/exam/{{ exam.id }}/deltask/{{ t.id }}', {}, '从总览移除这道操作题？')">移除</button>{% else %}<span class="muted">只读</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">每道操作题的评分规则在实操题库中独立维护，移除操作题不会改动原题。</p>
+  {% elif checks_list %}
+  <div class="note">这是旧考试保留的考试级评分规则，共 {{ practice_full }} 分。当前仅兼容展示，不再编辑；实操题自身规则请在实操题库维护。</div>
+  {% else %}<div class="empty">还没有装入操作题。</div>{% endif %}
+</div>
+</div><!-- /tab-overview -->
 
 <!-- 底部统一保存：选题页只保存当前题型，其他设置页保存全部设置 -->
 {% set selection_tabs = qtype_tabs + [('practice', '实操')] %}
 {% set selection_active = active in selection_tabs | map(attribute=0) | list %}
 <div class="bottom-action-bar">
   <div class="bar bottom-actions" id="selectionActions"{% if not selection_active %} hidden{% endif %}>
-    {% if exam.status in ('running', 'paused') %}
+    {% if config_locked %}
     <button type="button" class="btn gray lg" disabled
-            title="考试进行中不能修改配置">保存选题（考试进行中已锁定）</button>
+            title="考试进行中或已结束不能修改配置">保存选题（已锁定）</button>
     {% else %}
     <button type="button" class="btn green lg" id="saveQuestionsBtn"
             onclick="saveCurrentQuestions()">保存选题</button>
@@ -878,10 +1069,15 @@ function delRoster(rid){
     <button type="button" class="btn gray lg" onclick="showTab('basic')">返回基本设置</button>
     <span class="muted" id="selectionState">当前题型的勾选改动保存后才会生效</span>
   </div>
+  <div class="bar bottom-actions" id="overviewActions" hidden>
+    <a class="btn gray lg" href="/">返回控制台</a>
+    <a class="btn green lg" href="/scores/{{ exam.id }}">查看成绩</a>
+    <a class="btn lg" href="/exam/{{ exam.id }}/review">试卷评讲</a>
+  </div>
   <div class="bar bottom-actions" id="settingsActions"{% if selection_active %} hidden{% endif %}>
-    {% if exam.status in ('running', 'paused') %}
+    {% if config_locked %}
     <span class="btn gray" style="cursor:not-allowed"
-          title="考试进行中不能修改配置">保存全部设置（考试进行中已锁定）</span>
+          title="考试进行中或已结束不能修改配置">保存全部设置（已锁定）</span>
     {% else %}
     <button class="btn green lg" type="submit">保存全部设置</button>
     {% endif %}
@@ -889,146 +1085,80 @@ function delRoster(rid){
   </div>
 </div>
 
+</fieldset>
 </form>
 
-<script>
-(function () {
-  const TYPES = {{ rule_types | tojson }};
-  const TYPE_MAP = Object.fromEntries(TYPES.map(t => [t.value, t]));
-  const editor = document.getElementById('ruleEditor');
-  const hidden = document.getElementById('checksData');
-  const total = document.getElementById('ruleTotal');
-  let rules = {{ checks_list | tojson }};
-
-  const esc = value => String(value == null ? '' : value)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-
-  function valueOf(rule, field) {
-    if (field.key === 'cell_row') return (rule.expect?.cell || [])[0] ?? '';
-    if (field.key === 'cell_col') return (rule.expect?.cell || [])[1] ?? '';
-    if (field.key === 'cell_text') return (rule.expect?.cell || [])[2] ?? '';
-    const box = field.scope === 'rule' ? rule : (rule.expect || {});
-    const value = box[field.key];
-    if (Array.isArray(value)) return value.join(', ');
-    if (typeof value === 'boolean') return value ? 'true' : 'false';
-    return value == null ? '' : value;
-  }
-
-  function control(field, value) {
-    const common = `data-key="${esc(field.key)}" data-scope="${esc(field.scope)}"`;
-    if (field.kind === 'bool') {
-      return `<select ${common}><option value="">不要求</option><option value="true" ${value === 'true' ? 'selected' : ''}>是</option><option value="false" ${value === 'false' ? 'selected' : ''}>否</option></select>`;
-    }
-    if (field.kind === 'select') {
-      return `<select ${common}><option value="">请选择</option>${field.options.map(o => `<option value="${esc(o)}" ${String(value) === String(o) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-    }
-    if (field.kind === 'textarea') {
-      return `<textarea ${common} rows="3" placeholder="请输入${esc(field.label)}">${esc(value)}</textarea>`;
-    }
-    return `<input ${common} type="${field.kind === 'number' ? 'number' : 'text'}" step="any" value="${esc(value)}" placeholder="请输入${esc(field.label)}">`;
-  }
-
-  function cardHtml(rule, index) {
-    const spec = TYPE_MAP[rule.type] || TYPES[0];
-    const fields = [...(spec.locators || []), ...(spec.fields || [])];
-    return `<article class="rule-card" data-index="${index}">
-      <div class="rule-card-head">
-        <span class="rule-no">${index + 1}</span>
-        <input class="rule-id" data-key="id" value="${esc(rule.id || `评分点${index + 1}`)}" aria-label="评分点名称">
-        <select class="rule-type" data-key="type" aria-label="评分类型">${TYPES.map(t => `<option value="${t.value}" ${t.value === rule.type ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select>
-        <span class="rule-app">${esc(spec.app || '')}</span>
-        <div class="rule-actions">
-          <button type="button" data-act="up" title="上移">↑</button>
-          <button type="button" data-act="down" title="下移">↓</button>
-          <button type="button" data-act="del" title="删除">×</button>
+<!-- 拖拽题编辑器与主考试表单分开，避免嵌套 form；保存后留在当前拖拽题页。 -->
+<dialog class="drag-editor" id="dragEditor" aria-labelledby="dragEditorTitle">
+  <div class="drag-editor-head">
+    <strong id="dragEditorTitle">新建拖拽题</strong>
+    <button type="button" class="btn ghost sm" onclick="closeDragEditor()">关闭</button>
+  </div>
+  <form method="post" id="dragForm" target="dragSaveTarget" onsubmit="return submitDragQuestion(event)">
+    <fieldset {% if config_locked %}disabled{% endif %} style="border:0;padding:0;margin:0;min-width:0">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input type="hidden" name="qtype" value="drag">
+      <input type="hidden" name="ret_qtype" value="drag">
+      <div class="drag-editor-body">
+        <div class="drag-editor-grid">
+          <div>
+            <label for="dragScore">分值</label>
+            <input type="number" id="dragScore" name="score" min="0.01" step="0.01" value="2" required>
+          </div>
+          <div>
+            <label for="dragDifficulty">难度</label>
+            <select id="dragDifficulty" name="difficulty">
+              <option value="">未分类</option><option selected>基础</option><option>进阶</option><option>挑战</option>
+            </select>
+          </div>
+          <div>
+            <label for="dragCategory">分类</label>
+            <input type="text" id="dragCategory" name="category" placeholder="例如：会考拖拽">
+          </div>
+          <div>
+            <label for="dragSource">来源</label>
+            <input type="text" id="dragSource" name="source" placeholder="例如：自创题">
+          </div>
+          <div style="grid-column:1/-1">
+            <label for="dragStem">题干</label>
+            <textarea id="dragStem" name="stem" rows="3" required></textarea>
+          </div>
+          <div>
+            <label for="dragItems">拖拽项（每行一个，2～8 个）</label>
+            <textarea id="dragItems" name="drag_items" rows="6" required></textarea>
+          </div>
+          <div>
+            <label for="dragSlots">拖拽槽位（每行一个）</label>
+            <textarea id="dragSlots" name="drag_slots" rows="6" required></textarea>
+          </div>
+          <div>
+            <label for="dragAnswer">正确答案</label>
+            <input type="text" id="dragAnswer" name="answer" placeholder="1:A|2:B|3:C" required>
+            <span class="muted">答案段数与槽位数相同；也支持按槽位顺序写 A|B|C。</span>
+          </div>
+          <div>
+            <label for="dragLayout">布局</label>
+            <select id="dragLayout" name="drag_layout" onchange="updateDragPreview()">
+              <option value="grid">网格布局</option>
+              <option value="horizontal">横向流程</option>
+            </select>
+            <span class="muted">网格适合分组归类；横向流程适合按先后顺序拖放。</span>
+          </div>
         </div>
+        <div class="drag-preview" id="dragPreview" aria-label="拖拽布局预览">
+          <div class="drag-preview-items" id="dragPreviewItems"></div>
+          <div class="drag-preview-slots" id="dragPreviewSlots"></div>
+        </div>
+        <p class="muted" id="dragEditorTip" style="margin:10px 0 0">字段与桌面端一致；保存后可在左侧题库继续勾选加入本场考试。</p>
       </div>
-      <div class="rule-grid">
-        <label class="field"><span>分值</span><input data-key="score" type="number" min="0" max="1000" step="0.1" value="${esc(rule.score ?? 0)}"></label>
-        <label class="field"><span>部分得分（可选）</span><input data-key="partial" type="number" min="0" step="0.1" value="${esc(rule.partial ?? '')}"></label>
-        ${fields.map(field => `<label class="field ${field.kind === 'textarea' ? 'wide' : ''}"><span>${esc(field.label)}</span>${control(field, valueOf(rule, field))}</label>`).join('')}
+      <div class="bar" style="margin:0;padding:0 20px 20px">
+        <button type="submit" class="btn green" id="dragSaveBtn">保存拖拽题</button>
+        <button type="button" class="btn gray" onclick="closeDragEditor()">取消</button>
       </div>
-    </article>`;
-  }
-
-  function parseValue(field, raw) {
-    if (field.kind === 'number') return raw === '' ? '' : Number(raw);
-    if (field.kind === 'list') return raw.split(/[,，\s]+/).map(v => v.trim()).filter(Boolean);
-    return raw;
-  }
-
-  function readCard(card) {
-    const type = card.querySelector('[data-key="type"]').value;
-    const spec = TYPE_MAP[type] || TYPES[0];
-    const rule = {
-      id: card.querySelector('[data-key="id"]').value.trim() || '评分点',
-      type,
-      score: Number(card.querySelector('[data-key="score"]').value || 0)
-    };
-    const partial = card.querySelector('[data-key="partial"]').value;
-    if (partial !== '') rule.partial = Number(partial);
-    for (const field of [...(spec.locators || []), ...(spec.fields || [])]) {
-      if (field.key.startsWith('cell_')) continue;
-      const el = card.querySelector(`[data-key="${field.key}"][data-scope="${field.scope}"]`);
-      if (!el) continue;
-      const value = parseValue(field, el.value);
-      if (value === '' || (Array.isArray(value) && !value.length)) continue;
-      if (field.scope === 'rule') rule[field.key] = value;
-      else (rule.expect ||= {})[field.key] = value;
-    }
-    if (type === 'table') {
-      const row = card.querySelector('[data-key="cell_row"]')?.value;
-      const col = card.querySelector('[data-key="cell_col"]')?.value;
-      const text = card.querySelector('[data-key="cell_text"]')?.value;
-      if (row !== '' || col !== '' || text !== '') {
-        (rule.expect ||= {}).cell = [Number(row || 0), Number(col || 0), text];
-      }
-    }
-    return rule;
-  }
-
-  function collect() {
-    rules = Array.from(editor.querySelectorAll('.rule-card')).map(readCard);
-    hidden.value = JSON.stringify(rules);
-    total.textContent = '总分 ' + rules.reduce((sum, r) => sum + Number(r.score || 0), 0).toFixed(1).replace(/\.0$/, '');
-  }
-
-  function render() {
-    editor.innerHTML = rules.length ? rules.map(cardHtml).join('') :
-      '<div class="empty-state">还没有评分点，点击“添加评分点”开始。</div>';
-    collect();
-  }
-
-  editor.addEventListener('input', collect);
-  editor.addEventListener('change', event => {
-    if (event.target.matches('.rule-type')) {
-      const card = event.target.closest('.rule-card');
-      rules[Number(card.dataset.index)] = readCard(card);
-      render();
-    } else {
-      collect();
-    }
-  });
-  editor.addEventListener('click', event => {
-    const button = event.target.closest('[data-act]');
-    if (!button) return;
-    const card = button.closest('.rule-card');
-    const index = Number(card.dataset.index);
-    collect();
-    if (button.dataset.act === 'del') rules.splice(index, 1);
-    if (button.dataset.act === 'up' && index > 0) [rules[index - 1], rules[index]] = [rules[index], rules[index - 1]];
-    if (button.dataset.act === 'down' && index < rules.length - 1) [rules[index + 1], rules[index]] = [rules[index], rules[index + 1]];
-    render();
-  });
-  document.getElementById('addRule').addEventListener('click', () => {
-    rules.push({ id: `评分点${rules.length + 1}`, type: 'font', score: 5, expect: {} });
-    render();
-  });
-  editor.closest('form').addEventListener('submit', collect);
-  render();
-})();
-</script>
+    </fieldset>
+  </form>
+</dialog>
+<iframe id="dragSaveTarget" name="dragSaveTarget" hidden></iframe>
 
 <script>
 /* ============================================================
@@ -1040,11 +1170,15 @@ function delRoster(rid){
    现在统一用这几个函数：字段还在主表单里，只改 action 再 submit。
    ============================================================ */
 function submitMain(url, params, confirmMsg){
-  if (confirmMsg && !confirm(confirmMsg)) return;
+  if(CONFIG_LOCKED){ alert('这场考试的配置已锁定'); return; }
   var f = document.getElementById('examForm');
-  // 清掉上一次动态加的隐藏字段
+  var tab = document.getElementById('currentTab').value;
+  syncQuestionOrder(tab);
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  // 清掉上一次动态加的隐藏字段；tab 始终取当前页，避免重复字段。
   f.querySelectorAll('input[data-dyn]').forEach(function(e){ e.remove(); });
   Object.keys(params || {}).forEach(function(k){
+    if(k === 'tab') return;
     var i = document.createElement('input');
     i.type = 'hidden'; i.name = k; i.value = params[k];
     i.setAttribute('data-dyn', '1');
@@ -1055,10 +1189,46 @@ function submitMain(url, params, confirmMsg){
 }
 
 function submitWithFile(url, confirmMsg){
+  if(CONFIG_LOCKED){ alert('这场考试的配置已锁定'); return; }
   if (confirmMsg && !confirm(confirmMsg)) return;
   var f = document.getElementById('examForm');
   f.action = url;            // 主表单本身是 multipart，文件字段就在里面
   f.submit();
+}
+
+function deleteSelectedMaterials(button){
+  if(CONFIG_LOCKED) return;
+  var card = button.closest('.card');
+  var names = Array.prototype.map.call(card.querySelectorAll('.material-check:checked'), function(cb){
+    return cb.value;
+  });
+  if(!names.length){ alert('请先勾选要删除的素材。'); return; }
+  deleteMaterialNames(names, button);
+}
+function deleteMaterialNames(names, button){
+  if(CONFIG_LOCKED) return;
+  names = (names || []).filter(function(name){ return !!name; });
+  if(!names.length) return;
+  if(!confirm('从本场考试删除所选 ' + names.length + ' 个素材？题库和其他考试不受影响。')) return;
+  button.disabled = true;
+  // 后端逐个读取并写回素材列表，必须串行，避免并发删除互相覆盖。
+  var jobs = names.reduce(function(chain, name){
+    return chain.then(function(){
+      return fetch('/exam/{{ exam.id }}/material/del/' + encodeURIComponent(name), {
+        method: 'POST',
+        headers: {'X-CSRF-Token': CSRF},
+        body: new URLSearchParams({_csrf: CSRF})
+      }).then(function(r){
+        if(!r.ok) throw new Error('素材删除失败');
+      });
+    });
+  }, Promise.resolve());
+  jobs.then(function(){
+    location.href = '/exam/{{ exam.id }}?tab=practice';
+  }).catch(function(){
+    button.disabled = false;
+    alert('素材删除失败，请刷新页面确认当前状态。');
+  });
 }
 
 /* 全部题型标签页（顺序和标签栏一一对应，不再藏起来） */
@@ -1066,13 +1236,116 @@ var TABS = [{% for k, l in type_tabs.items %}'{{ k }}'{{ "," if not loop.last }}
 var THEORY_TABS = [{% for k, l in qtype_tabs %}'{{ k }}'{{ "," if not loop.last }}{% endfor %}];
 var SELECTION_TABS = THEORY_TABS.concat(['practice']);
 var DIRTY = {};
+var DRAG_EDIT_QID = 0;
+var DRAG_QUESTIONS = {
+{% for q in allq if q.qtype == 'drag' %}
+  {{ q.id|tojson }}: {{ {
+    'id': q.id, 'score': q.score, 'difficulty': q.difficulty or '',
+    'stem': q.stem or '', 'items': q.options or [], 'answer': q.answer or '',
+    'category': q.category or '', 'source': q.source or '',
+    'payload': q.payload or ''
+  }|tojson }}{% if not loop.last %},{% endif %}
+{% endfor %}
+};
+
+function openDragEditor(qid, button){
+  if(CONFIG_LOCKED) return;
+  qid = Number(qid || 0);
+  var q = qid ? DRAG_QUESTIONS[String(qid)] : null;
+  if(qid && !q){ alert('这道拖拽题的数据读不出来，请刷新页面。'); return; }
+  var form = document.getElementById('dragForm');
+  form.reset();
+  DRAG_EDIT_QID = qid;
+  document.getElementById('dragEditorTitle').textContent = q ? '编辑拖拽题 · ID ' + qid : '新建拖拽题';
+  document.getElementById('dragSaveBtn').textContent = q ? '保存修改' : '保存拖拽题';
+  document.getElementById('dragScore').value = q ? (q.score || 2) : 2;
+  document.getElementById('dragDifficulty').value = q ? (q.difficulty || '') : '基础';
+  document.getElementById('dragCategory').value = q ? (q.category || '') : '';
+  document.getElementById('dragSource').value = q ? (q.source || '') : '';
+  document.getElementById('dragStem').value = q ? (q.stem || '') : '';
+  document.getElementById('dragItems').value = q ? (q.items || []).join('\n') : '';
+  document.getElementById('dragSlots').value = q ? (q.slots || []).join('\n') : '';
+  document.getElementById('dragAnswer').value = q ? (q.answer || '') : '';
+  document.getElementById('dragLayout').value = q && q.layout === 'horizontal' ? 'horizontal' : 'grid';
+  document.getElementById('dragEditorTip').textContent = '字段与桌面端一致；保存后可在左侧题库继续勾选加入本场考试。';
+  updateDragPreview();
+  var dialog = document.getElementById('dragEditor');
+  if(dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', '');
+}
+function closeDragEditor(){
+  var dialog = document.getElementById('dragEditor');
+  if(dialog.close) dialog.close(); else dialog.removeAttribute('open');
+}
+function updateDragPreview(){
+  var items = document.getElementById('dragItems').value.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
+  var slots = document.getElementById('dragSlots').value.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
+  var horizontal = document.getElementById('dragLayout').value === 'horizontal';
+  var preview = document.getElementById('dragPreview');
+  preview.classList.toggle('horizontal', horizontal);
+  var itemBox = document.getElementById('dragPreviewItems');
+  var slotBox = document.getElementById('dragPreviewSlots');
+  itemBox.textContent = ''; slotBox.textContent = '';
+  items.slice(0, 8).forEach(function(text){
+    var chip = document.createElement('span'); chip.className = 'drag-chip'; chip.textContent = text; itemBox.appendChild(chip);
+  });
+  slots.forEach(function(text, index){
+    var chip = document.createElement('span'); chip.className = 'drag-chip'; chip.textContent = (index + 1) + '. ' + text; slotBox.appendChild(chip);
+  });
+  if(!items.length){ itemBox.textContent = '拖拽项预览'; }
+  if(!slots.length){ slotBox.textContent = '槽位预览'; }
+}
+['dragItems','dragSlots'].forEach(function(id){
+  document.getElementById(id).addEventListener('input', updateDragPreview);
+});
+function submitDragQuestion(event){
+  if(CONFIG_LOCKED){ event.preventDefault(); alert('这场考试的配置已锁定'); return false; }
+  var items = document.getElementById('dragItems').value.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
+  var slots = document.getElementById('dragSlots').value.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
+  var answer = document.getElementById('dragAnswer').value.trim();
+  var tip = document.getElementById('dragEditorTip');
+  function fail(message){ tip.textContent = message; tip.style.color = 'var(--danger)'; return false; }
+  tip.style.color = '';
+  if(!document.getElementById('dragStem').value.trim()) return fail('题干不能为空。');
+  if(!(Number(document.getElementById('dragScore').value) > 0)) return fail('分值必须大于 0。');
+  if(items.length < 2 || items.length > 8) return fail('拖拽项需要 2～8 个（每行一个）。');
+  if(slots.length < 2) return fail('拖拽题至少需要 2 个槽位（每行一个）。');
+  if(!answer) return fail('正确答案不能为空。');
+  var parts = answer.split(/[|｜，,;；\n]+/).map(function(s){ return s.trim(); }).filter(Boolean);
+  var explicit = parts.some(function(part){ return /^\d+\s*[:：=]/.test(part); });
+  var pairs = [];
+  for(var i = 0; i < parts.length; i++){
+    var match = explicit ? parts[i].match(/^(\d+)\s*[:：=]\s*([A-Za-z])$/) : parts[i].match(/^([A-Za-z])$/);
+    if(!match) return fail('答案格式应为 1:A|2:B，或按槽位顺序写 A|B。');
+    var slot = explicit ? Number(match[1]) : i + 1;
+    var letter = (explicit ? match[2] : match[1]).toUpperCase();
+    if(slot < 1 || slot > slots.length) return fail('答案中的槽位编号超出范围。');
+    if(letter.charCodeAt(0) > 64 + items.length) return fail('答案字母超出了拖拽项范围。');
+    pairs.push(slot + ':' + letter);
+  }
+  if(pairs.length !== slots.length) return fail(slots.length + ' 个槽位需要 ' + slots.length + ' 段答案。');
+  document.getElementById('dragAnswer').value = pairs.join('|');
+  var form = document.getElementById('dragForm');
+  form.action = DRAG_EDIT_QID ? '/question/' + DRAG_EDIT_QID + '/edit' : '/question/add';
+  document.getElementById('dragSaveTarget').dataset.pending = '1';
+  return true;
+}
+function dragSaveFinished(frame){
+  if(frame.dataset.pending !== '1') return;
+  frame.dataset.pending = '';
+  location.href = '/exam/{{ exam.id }}?tab=drag';
+}
+document.getElementById('dragSaveTarget').addEventListener('load', function(){
+  dragSaveFinished(this);
+});
 
 function updateBottomActions(name){
   var selection = document.getElementById('selectionActions');
   var settings = document.getElementById('settingsActions');
+  var overview = document.getElementById('overviewActions');
   var choosing = SELECTION_TABS.indexOf(name) >= 0;
   if(selection) selection.hidden = !choosing;
-  if(settings) settings.hidden = choosing;
+  if(settings) settings.hidden = choosing || name === 'overview';
+  if(overview) overview.hidden = name !== 'overview';
   var tip = document.getElementById('selectionState');
   if(tip){
     tip.textContent = DIRTY[name] ? '有未保存的选题改动，请先点「保存选题」' :
@@ -1110,30 +1383,145 @@ function markTypeDirty(type){
   updateBottomActions(document.getElementById('currentTab').value);
 }
 
+function syncSelectedQuestion(type, qid, checked){
+  var list = document.getElementById('selected-list-' + type);
+  if(!list) return;
+  var row = list.querySelector('.selected-question-row[data-qid="' + qid + '"]');
+  if(!row) return;
+  row.style.display = checked ? '' : 'none';
+  if(checked) list.appendChild(row);   // 新选中的题排在右侧末尾
+  var empty = list.querySelector('.selected-empty-' + type);
+  if(empty){
+    var hasSelected = Array.prototype.some.call(list.querySelectorAll('.selected-question-row'), function(r){
+      return r.style.display !== 'none';
+    });
+    empty.style.display = hasSelected ? 'none' : '';
+  }
+  syncQuestionOrder(type);
+}
+
+function syncQuestionOrder(type){
+  var list = document.getElementById('selected-list-' + type);
+  var hidden = document.getElementById('qids-order-' + type);
+  if(!list || !hidden) return;
+  var ids = [];
+  Array.prototype.forEach.call(list.querySelectorAll('.selected-question-row'), function(row, index){
+    if(row.style.display === 'none') return;
+    var seq = row.querySelector('.seq');
+    if(seq) seq.textContent = ids.length + 1;
+    ids.push(row.dataset.qid);
+  });
+  hidden.value = ids.join(',');
+}
+
 function onQuestionChange(type, checkbox){
+  if(CONFIG_LOCKED){ checkbox.checked = !checkbox.checked; return; }
   var row = checkbox.closest('tr');
   if(row) row.classList.toggle('selected', checkbox.checked);
+  syncSelectedQuestion(type, checkbox.value, checkbox.checked);
   countType(type);
   markTypeDirty(type);
 }
 
 function removeTypeQuestion(type, qid, button){
+  if(CONFIG_LOCKED) return;
   if(!confirm('把这题从本场考试移除？（题库里还在，点底部「保存选题」后生效）')) return;
   var checkbox = document.querySelector('.qTable-' + type + ' input[value="' + qid + '"]');
   if(checkbox){
     checkbox.checked = false;
     onQuestionChange(type, checkbox);
   } else {
+    syncSelectedQuestion(type, qid, false);
+    countType(type);
     markTypeDirty(type);
   }
-  var row = button.closest('tr');
-  if(row) row.classList.add('pending-remove');
+}
+
+function visibleSelectedRows(type){
+  return Array.prototype.filter.call(
+    document.querySelectorAll('#selected-list-' + type + ' .selected-question-row'),
+    function(row){ return row.style.display !== 'none'; });
+}
+function moveTypeQuestion(type, qid, delta, button){
+  if(CONFIG_LOCKED) return;
+  var list = document.getElementById('selected-list-' + type);
+  var rows = visibleSelectedRows(type);
+  var index = rows.findIndex(function(row){ return row.dataset.qid === String(qid); });
+  var target = index + delta;
+  if(index < 0 || target < 0 || target >= rows.length) return;
+  if(delta < 0) list.insertBefore(rows[index], rows[target]);
+  else list.insertBefore(rows[index], rows[target].nextSibling);
+  syncQuestionOrder(type);
+  markTypeDirty(type);
+  if(button) button.focus();
+}
+function sortSelectedQuestions(type){
+  if(CONFIG_LOCKED) return;
+  var card = document.getElementById('tab-' + type).querySelector('.card');
+  var mode = card.querySelector('.f-sort').value;
+  if(mode === 'order'){ quickTip('当前已是选题顺序'); return; }
+  var list = document.getElementById('selected-list-' + type);
+  var rows = visibleSelectedRows(type);
+  rows.sort(function(a, b){
+    if(mode === 'id') return Number(a.dataset.qid) - Number(b.dataset.qid);
+    if(mode === 'score_desc') return Number(b.dataset.score) - Number(a.dataset.score) || Number(a.dataset.qid) - Number(b.dataset.qid);
+    if(mode === 'score_asc') return Number(a.dataset.score) - Number(b.dataset.score) || Number(a.dataset.qid) - Number(b.dataset.qid);
+    return 0;
+  });
+  if(mode === 'category'){
+    // 已选行不重复显示分类，排序时回查左侧题库行。
+    rows.sort(function(a, b){
+      var ar = document.querySelector('.qTable-' + type + ' tr[data-qid="' + a.dataset.qid + '"]');
+      var br = document.querySelector('.qTable-' + type + ' tr[data-qid="' + b.dataset.qid + '"]');
+      return (ar ? ar.dataset.cat : '').localeCompare(br ? br.dataset.cat : '', 'zh-CN') ||
+             Number(a.dataset.qid) - Number(b.dataset.qid);
+    });
+  }
+  rows.forEach(function(row){ list.appendChild(row); });
+  syncQuestionOrder(type);
+  if(rows.length > 1) markTypeDirty(type);
+  quickTip('已按当前规则重排已选题目');
+}
+function filterQuestionBank(type){
+  var card = document.getElementById('tab-' + type).querySelector('.card');
+  var keyword = card.querySelector('.f-keyword').value.trim().toLowerCase();
+  var category = card.querySelector('.f-cat').value;
+  var table = card.querySelector('.qTable-' + type);
+  table.querySelectorAll('tr[data-qid]').forEach(function(row){
+    var haystack = (row.cells[1].textContent + ' ' + (row.dataset.cat || '')).toLowerCase();
+    row.style.display = (!keyword || haystack.indexOf(keyword) >= 0) &&
+                        (!category || row.dataset.cat === category) ? '' : 'none';
+  });
+  sortQuestionBank(type);
+}
+function sortQuestionBank(type){
+  var card = document.getElementById('tab-' + type).querySelector('.card');
+  var mode = card.querySelector('.f-sort').value;
+  var table = card.querySelector('.qTable-' + type);
+  var order = {};
+  visibleSelectedRows(type).forEach(function(row, index){ order[row.dataset.qid] = index; });
+  var rows = Array.prototype.slice.call(table.querySelectorAll('tr[data-qid]'));
+  rows.sort(function(a, b){
+    var aid = Number(a.dataset.qid), bid = Number(b.dataset.qid);
+    if(mode === 'id') return aid - bid;
+    if(mode === 'score_desc') return Number(b.dataset.score) - Number(a.dataset.score) || aid - bid;
+    if(mode === 'score_asc') return Number(a.dataset.score) - Number(b.dataset.score) || aid - bid;
+    if(mode === 'category') return (a.dataset.cat || '').localeCompare(b.dataset.cat || '', 'zh-CN') || aid - bid;
+    var as = order[a.dataset.qid], bs = order[b.dataset.qid];
+    if(as !== undefined && bs !== undefined) return as - bs;
+    if(as !== undefined) return -1;
+    if(bs !== undefined) return 1;
+    return aid - bid;
+  });
+  rows.forEach(function(row){ table.appendChild(row); });
 }
 
 function saveCurrentQuestions(){
+  if(CONFIG_LOCKED) return;
   var type = document.getElementById('currentTab').value;
+  syncQuestionOrder(type);
   if(type === 'practice'){
-    // 实操任务从题库装入时已即时保存；底部按钮保存本页的题型、要求和评分规则。
+    // 实操任务从题库装入时已即时保存；这里保存题型、要求和旧版兼容字段。
     submitMain('/exam/{{ exam.id }}', {save_mode:'questions', tab:type});
     return;
   }
@@ -1162,7 +1550,7 @@ syncTypeSwitches();
    点一下就自动保存，不用再按「保存全部设置」。
    连续勾几个框只发一次请求（300ms 防抖）。
    ============================================================ */
-var CSRF = '{{ csrf_token }}';      // fetch 走的不是表单，得自己带上
+var CSRF = {{ csrf_token|tojson }};      // fetch 走的不是表单，得自己带上
 var QUICK_TIMER = null;
 function quickTip(msg, bad){
   var t = document.getElementById('quickTip');
@@ -1175,6 +1563,7 @@ function quickTip(msg, bad){
   quickTip._h = setTimeout(function(){ t.style.display = 'none'; }, 2200);
 }
 function quickSaveNow(){
+  if(CONFIG_LOCKED) return;
   var types = [];
   document.querySelectorAll('.qtype-cb:checked').forEach(function(cb){
     types.push(cb.value);
@@ -1202,7 +1591,8 @@ function quickSaveNow(){
 }
 var TAB_LABEL = {
   single: '单选题', multi: '多选题', judge: '判断题', blank: '填空题',
-  drag: '拖拽题', code: '程序填空', practice: '实操', typing: '打字', drawing: '画板'
+  drag: '拖拽题', code: '程序填空', practice: '实操', typing: '打字', drawing: '画板',
+  overview: '总览'
 };
 function updateTypeSummary(types){
   var box = document.getElementById('typeSummary');
@@ -1271,6 +1661,7 @@ function renderRoster(ros){
   box.innerHTML = html;
 }
 function savePinyin(){
+  if(CONFIG_LOCKED) return;
   var ta = document.getElementById('pinyinOverride');
   var tip = document.getElementById('pinyinTip');
   if(!ta || !tip) return;
@@ -1294,15 +1685,18 @@ function savePinyin(){
   });
 })();
 
-/* 打字子任务没勾的，对应配置行灰掉（配置还在，只是这场不考） */
+/* 打字子任务没启用时只显示开关，启用后才展开自己的配置 */
 function syncTypingRows(){
   document.querySelectorAll('.typing-enable').forEach(function(cb){
-    // 一个子任务可能有好几行（配置行 + 展开面板），没勾的全部隐藏而不是灰显
-    document.querySelectorAll('.typing-cfg-row[data-task="' + cb.dataset.task + '"]')
-      .forEach(function(row){
-        row.style.display = cb.checked ? '' : 'none';
-      });
+    var task = cb.closest('.typing-task');
+    if(task) task.classList.toggle('enabled', cb.checked);
   });
+  updateTypingTabCount();
+}
+function updateTypingTabCount(){
+  var n = document.querySelectorAll('.typing-enable:checked').length;
+  var btn = document.querySelector('.tab-btn[data-tab="typing"] .tab-count');
+  if(btn) btn.textContent = n;
 }
 document.querySelectorAll('.typing-enable').forEach(function(cb){
   cb.addEventListener('change', syncTypingRows);
@@ -1313,16 +1707,22 @@ function countType(type){
   var n = document.querySelectorAll('.qTable-'+type+' input[type=checkbox]:checked').length;
   var el = document.querySelector('.count-'+type);
   if(el) el.textContent = '已选 '+n+' 题';
+  var total = document.querySelector('.selected-total-'+type);
+  if(total) total.textContent = n + ' 题';
+  var tabCount = document.querySelector('.tab-btn[data-tab="'+type+'"] .tab-count');
+  if(tabCount) tabCount.textContent = n;
+  syncQuestionOrder(type);
 }
 
 function toggleTypeAll(type, on){
+  if(CONFIG_LOCKED) return;
   var changed = false;
   document.querySelectorAll('.qTable-'+type+' tr[data-cat]').forEach(function(r){
     if(r.style.display==='none') return;
     var cb = r.querySelector('input[type=checkbox]');
     if(cb && cb.checked !== on){
       cb.checked = on;
-      r.classList.toggle('selected', on);
+      onQuestionChange(type, cb);
       changed = true;
     }
   });
@@ -1330,16 +1730,18 @@ function toggleTypeAll(type, on){
   if(changed) markTypeDirty(type);
 }
 
-/* 分类筛选 */
+/* 题库搜索 / 分类筛选 / 排序 */
+document.querySelectorAll('.f-keyword').forEach(function(input){
+  var type = input.closest('.tab-panel').id.replace('tab-', '');
+  input.addEventListener('input', function(){ filterQuestionBank(type); });
+});
 document.querySelectorAll('.f-cat').forEach(function(sel){
-  sel.addEventListener('change', function(){
-    var cat = this.value;
-    var table = this.closest('.card').querySelector('table');
-    if(!table) return;
-    table.querySelectorAll('tr[data-cat]').forEach(function(r){
-      r.style.display = (!cat || r.dataset.cat===cat) ? '' : 'none';
-    });
-  });
+  var type = sel.closest('.tab-panel').id.replace('tab-', '');
+  sel.addEventListener('change', function(){ filterQuestionBank(type); });
+});
+document.querySelectorAll('.f-sort').forEach(function(sel){
+  var type = sel.closest('.tab-panel').id.replace('tab-', '');
+  sel.addEventListener('change', function(){ sortQuestionBank(type); });
 });
 /* 嵌套滚动：鼠标位于容器内（hover）或容器获得焦点时，先滚容器；
    到达边界后不拦截事件，页面照常滚动，避免 nested scroll 卡死。 */
@@ -1370,9 +1772,9 @@ function enableExamScrollWheel(){
 
 /* 页面加载时自动切到指定标签页 */
 document.addEventListener('DOMContentLoaded', function(){
-  var tab = '{{ active_tab or "" }}';
+  var tab = {{ (active_tab or '')|tojson }};
   if(tab) showTab(tab);
-  THEORY_TABS.forEach(countType);
+  THEORY_TABS.forEach(function(type){ countType(type); sortQuestionBank(type); });
   updateBottomActions(document.getElementById('currentTab').value);
   enableExamScrollWheel();
 });

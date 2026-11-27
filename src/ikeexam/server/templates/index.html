@@ -67,6 +67,10 @@ function askStop(id, title){
   document.getElementById('stopMask').style.display = 'block';
   document.getElementById('stopBox').style.display = 'block';
 }
+function askStopExam(id){
+  var row = document.querySelector('.exam-card[data-exam-id="' + id + '"]');
+  askStop(id, row ? row.getAttribute('data-title') : '这场考试');
+}
 function closeStop(){
   document.getElementById('stopMask').style.display = 'none';
   document.getElementById('stopBox').style.display = 'none';
@@ -92,93 +96,180 @@ function doStop(clearLogin){
 </div>
 
 <!-- 所有考试（每场独立控制） -->
-<div class="card">
-  <h2>所有考试</h2>
-  {% for e in exams %}
-  <article class="exam-card status-{{ e.status }}">
-    <div class="head-actions" style="margin-bottom:12px">
-      <span class="exam-title">{{ e.title }}</span>
-      {% if e.code %}<span class="tag code" title="考试编号（新建考试时自动生成）">{{ e.code }}</span>{% endif %}
-      <span class="tag {{ 'ok' if e.status=='running' else 'warn' if e.status=='paused' else 'info' if e.status=='draft' else 'gray' }}">
-        {{ '进行中' if e.status=='running' else '已暂停' if e.status=='paused' else '未开始' if e.status=='draft' else '已结束' }}
-      </span>
-      {% if e.klass %}<span class="tag gray">班级：{{ e.klass }}</span>
-      {% elif e.status != 'draft' %}<span class="tag gray">未分班</span>{% endif %}
-      {% if e.has_practice %}
-      <span class="tag gray">{% for t in e.practice_types %}{{ type_name.get(t, t) }}{{ ' / ' if not loop.last }}{% endfor %}</span>
-      {% endif %}
-      <span class="muted">
-        时长 <b>{{ e.duration }}</b> 分　理论 <b>{{ e.theory_n }}</b> 题
-        {%- if e.has_practice %}　实操 <b>{{ e.practice_n }}</b> 道{% endif %}
-      </span>
-      {% if e.remaining_text %}
-      <span class="tag {{ 'ok' if e.status=='running' else 'warn' }}"
-            title="考试总倒计时（理论题、实操题共用）">
-        {{ '剩余' if e.status=='running' else '暂停于' }} {{ e.remaining_text }}</span>
-      {% endif %}
-      {% if not e.ready %}
-      <span class="tag no">没有题目</span>
-      {% endif %}
-    </div>
-
-    <div class="bar" style="margin:8px 0 0 0">
-      {% if e.status == 'draft' %}
-        {% if e.ready %}
-        {# 开考前要先填班级（答卷按班级归档），所以进确认页而不是直接开考 #}
-        <a class="btn green" href="/exam/{{ e.id }}/start">
-          {{ icon('play') }} 开始考试</a>
-        <span class="muted">← 下一步填班级</span>
-        {% else %}
-        <span class="btn gray" style="cursor:not-allowed"
-              title="这场考试还没有任何题目">{{ icon('play') }} 开始考试</span>
-        <span class="muted">← 先点右边「编辑」加题目，加完才能开始</span>
+<style>
+.resizable-scroll{max-width:100%;overflow:auto;scrollbar-gutter:stable}
+.resizable-table{table-layout:fixed}
+.resizable-table th{position:relative}
+.resizable-table th .col-resizer{position:absolute;z-index:4;right:-4px;top:0;width:9px;height:100%;
+  cursor:col-resize;touch-action:none;user-select:none}
+.resizable-table th .col-resizer::after{content:"";position:absolute;right:4px;top:8px;bottom:8px;width:2px;
+  background:transparent;border-radius:2px}
+.resizable-table th .col-resizer:hover::after,.resizable-table th .col-resizer:focus-visible::after,
+.resizable-table.is-resizing th .col-resizer.active::after{background:var(--brand)}
+body.table-resizing,body.table-resizing *{cursor:col-resize!important;user-select:none!important}
+.resizable-table [hidden]{display:none!important}
+.exam-list-table td{vertical-align:top}
+.exam-list-table tr.exam-card{border:0;border-left:0;border-radius:0;padding:0;margin:0;box-shadow:none}
+.exam-list-table tr.exam-card:hover{transform:none;box-shadow:none}
+.exam-list-table tr.status-running{background:var(--mint)}
+.exam-list-table tr.status-paused{background:var(--lemon)}
+.exam-list-table tr.status-draft{background:var(--lavender)}
+.exam-list-table tr.status-stopped{background:var(--white)}
+.exam-list-table .exam-title-line{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}
+.exam-list-table .bar{margin:0;gap:5px}
+.exam-list-table .exam-table-actions .btn{margin:2px;padding:6px 9px;min-height:34px;font-size:11px;box-shadow:2px 2px 0 var(--navy)}
+.exam-list-table .exam-select-cell{text-align:center}
+.exam-list-table .muted{line-height:1.65}
+</style>
+<div class="card exam-list-card">
+  <h2 style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    所有考试
+    <span class="muted" id="selection-count" style="font-size:12px;font-weight:normal">已选 0 场</span>
+    <span class="muted" style="font-size:12px;font-weight:normal">右键操作，双击按状态快捷处理；拖动表头分隔线调整列宽，双击表头自适应。</span>
+  </h2>
+  <form id="batchExportForm" method="post" action="/exams/export" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <span id="batchIds" hidden></span>
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px">
+      <input type="checkbox" id="selectAllExams" onchange="toggleAllExams(this.checked)"> 全选
+    </label>
+    <button class="btn orange sm" type="submit" onclick="return prepareBatchExport()">
+      {{ icon('download', 14) }} 批量导出
+    </button>
+    <span class="muted" style="font-size:12px">导出为一个 Excel 文件，每场考试一个工作表。</span>
+  </form>
+  <div class="scroll resizable-scroll" tabindex="0" aria-label="考试列表，可横向滚动">
+  <table id="exams-table" class="resizable-table exam-list-table" data-resizable
+         data-table-key="exams" data-min-width="1280" style="min-width:1280px">
+    <colgroup>
+      <col style="width:48px" data-default-width="48" data-min-width="44">
+      <col style="width:300px" data-default-width="300" data-min-width="220">
+      <col style="width:100px" data-default-width="100" data-min-width="88">
+      <col style="width:190px" data-default-width="190" data-min-width="150">
+      <col style="width:140px" data-default-width="140" data-min-width="110">
+      <col style="width:240px" data-default-width="240" data-min-width="190">
+      <col style="width:430px" data-default-width="430" data-min-width="320">
+    </colgroup>
+    <thead>
+      <tr><th>选择</th><th>考试</th><th>状态</th><th>班级 / 内容</th><th>时长 / 剩余</th><th>状态操作</th><th>管理 / 导出</th></tr>
+    </thead>
+    <tbody>
+    {% for e in exams %}
+    <tr class="exam-card status-{{ e.status }}" data-exam-id="{{ e.id }}"
+        data-title="{{ e.title }}" data-status="{{ e.status }}" data-ready="{{ 'true' if e.ready else 'false' }}"
+        oncontextmenu="showExamMenu(event, {{ e.id }})"
+        ondblclick="doubleClickExam(event, {{ e.id }})">
+      <td class="exam-select-cell">
+        <input type="checkbox" class="exam-select" value="{{ e.id }}" aria-label="选择考试 {{ e.title }}"
+               onchange="updateExamSelection()">
+      </td>
+      <td>
+        <div class="exam-title-line">
+          <span class="exam-title">{{ e.title }}</span>
+          {% if e.code %}<span class="tag code" title="考试编号（新建考试时自动生成）">{{ e.code }}</span>{% endif %}
+        </div>
+        {% if not e.ready %}<span class="tag no">没有题目</span>{% endif %}
+        {% if e.has_practice %}
+        <div class="muted" style="margin-top:5px">{% for t in e.practice_types %}{{ type_name.get(t, t) }}{{ ' / ' if not loop.last }}{% endfor %}</div>
         {% endif %}
+      </td>
+      <td>
+        <span class="tag {{ 'ok' if e.status=='running' else 'warn' if e.status=='paused' else 'info' if e.status=='draft' else 'gray' }}">
+          {{ '进行中' if e.status=='running' else '已暂停' if e.status=='paused' else '未开始' if e.status=='draft' else '已结束' }}
+        </span>
+        {% if e.status == 'stopped' %}<div class="tag gray" style="margin-top:6px">只读</div>{% endif %}
+      </td>
+      <td>
+        <div>班级：{{ e.klass or ('未分班' if e.status != 'draft' else '待填写') }}</div>
+        <div class="muted">理论 <b>{{ e.theory_n }}</b> 题{% if e.has_practice %}　实操 <b>{{ e.practice_n }}</b> 道{% endif %}</div>
+      </td>
+      <td>
+        <div>时长 <b>{{ e.duration }}</b> 分</div>
+        {% if e.remaining_text %}
+        <div class="tag {{ 'ok' if e.status=='running' else 'warn' }}" style="margin-top:6px"
+             title="考试总倒计时（理论题、实操题共用）">
+          {{ '剩余' if e.status=='running' else '暂停于' }} {{ e.remaining_text }}</div>
+        {% endif %}
+      </td>
+      <td>
+        <div class="bar">
+          {% if e.status == 'draft' %}
+            {% if e.ready %}
+            <a class="btn green sm" href="/exam/{{ e.id }}/start">{{ icon('play', 14) }} 开始考试</a>
+            <span class="muted">下一步填班级</span>
+            {% else %}
+            <span class="btn gray sm" style="cursor:not-allowed" title="这场考试还没有任何题目">{{ icon('play', 14) }} 开始考试</span>
+            <span class="muted">请先编辑加题</span>
+            {% endif %}
+          {% elif e.status == 'running' %}
+            <form method="post" action="/exam/{{ e.id }}/pause" style="display:inline"
+                  onsubmit="return confirm('暂停后学生端停止计时、不能交卷，确定暂停？')">
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+              <button class="btn orange sm">{{ icon('pause', 14) }} 暂停</button>
+            </form>
+            <a class="btn red sm" href="javascript:void(0)" onclick="askStopExam({{ e.id }})">{{ icon('stop', 14) }} 结束</a>
+          {% elif e.status == 'paused' %}
+            <form method="post" action="/exam/{{ e.id }}/resume" style="display:inline">
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+              <button class="btn green sm">{{ icon('resume', 14) }} 恢复</button>
+            </form>
+            <a class="btn red sm" href="javascript:void(0)" onclick="askStopExam({{ e.id }})">{{ icon('stop', 14) }} 结束</a>
+          {% elif e.status == 'stopped' %}
+            <span class="muted">{{ icon('check', 14) }} 已结束，可复制后开启新考试</span>
+          {% endif %}
+        </div>
+      </td>
+      <td>
+        <div class="bar exam-table-actions">
+          {% if e.status == 'stopped' %}
+          <a class="btn sm" href="/exam/{{ e.id }}?tab=overview">{{ icon('book', 14) }} 查看</a>
+          {% else %}
+          <a class="btn sm" href="/exam/{{ e.id }}">{{ icon('edit', 14) }} 编辑</a>
+          {% endif %}
+          <form method="post" action="/exam/{{ e.id }}/copy" style="display:inline"
+                onsubmit="return confirm('复制这场考试为新考试？')">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button class="btn sm" title="复制全部设置、选题和学生名单">{{ icon('plus', 14) }} 复制考试</button>
+          </form>
+          <a class="btn sm green" href="/exam/{{ e.id }}/review"
+             title="试卷评讲：逐题看对错人数、点人数看名单、点一下才显示答案">{{ icon('book', 14) }} 评讲</a>
+          <a class="btn sm orange" href="/scores/{{ e.id }}">{{ icon('chart', 14) }} 成绩</a>
+          {% if e.has_typing %}
+          <a class="btn sm" href="/exam/{{ e.id }}/typing"
+             title="打字练习汇总统计：做了多少 / 正确率 / 用时 / 综合评分（不计分）">{{ icon('play', 14) }} 打字统计</a>
+          {% endif %}
+          <a class="btn sm ghost" href="/exam/{{ e.id }}/export">{{ icon('download', 14) }} 导出</a>
+          {% if e.status == 'draft' %}
+          <form method="post" action="/exam/{{ e.id }}/delete" style="display:inline"
+                onsubmit="return confirm('确定删除这场考试？不可恢复！')">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button class="btn sm red">{{ icon('trash', 14) }} 删除</button>
+          </form>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7"><div class="empty">还没有考试，点「新建考试」开始。</div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
 
-      {% elif e.status == 'running' %}
-        <form method="post" action="/exam/{{ e.id }}/pause" style="display:inline"
-              onsubmit="return confirm('暂停后学生端停止计时、不能交卷，确定暂停？')">
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-          <button class="btn orange">{{ icon('pause') }} 暂停</button>
-        </form>
-        <a class="btn red" href="javascript:void(0)"
-           onclick="askStop({{ e.id }}, '{{ e.title|replace("'", "\\'") }}')">{{ icon('stop') }} 结束考试</a>
-
-      {% elif e.status == 'paused' %}
-        <form method="post" action="/exam/{{ e.id }}/resume" style="display:inline">
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-          <button class="btn green">{{ icon('resume') }} 恢复考试</button>
-        </form>
-        <a class="btn red" href="javascript:void(0)"
-           onclick="askStop({{ e.id }}, '{{ e.title|replace("'", "\\'") }}')">{{ icon('stop') }} 结束考试</a>
-
-      {% elif e.status == 'stopped' %}
-        <span class="muted">{{ icon('check', 14) }} 已结束</span>
-      {% endif %}
-
-      <span style="flex:1"></span>
-      <a class="btn sm" href="/exam/{{ e.id }}">{{ icon('edit', 14) }} 编辑</a>
-      <a class="btn sm green" href="/exam/{{ e.id }}/review"
-         title="试卷评讲：逐题看对错人数、点人数看名单、点一下才显示答案">
-        {{ icon('book', 14) }} 评讲</a>
-      <a class="btn sm orange" href="/scores/{{ e.id }}">{{ icon('chart', 14) }} 成绩</a>
-      {% if e.has_typing %}
-      <a class="btn sm" href="/exam/{{ e.id }}/typing"
-         title="打字练习汇总统计：做了多少 / 正确率 / 用时 / 综合评分（不计分）">
-        {{ icon('play', 14) }} 打字统计</a>
-      {% endif %}
-      <a class="btn sm ghost" href="/exam/{{ e.id }}/export">{{ icon('download', 14) }} 导出</a>
-      {% if e.status != 'running' and e.status != 'paused' %}
-        <form method="post" action="/exam/{{ e.id }}/delete" style="display:inline"
-              onsubmit="return confirm('确定删除「{{ e.title }}」？不可恢复！')">
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-          <button class="btn sm red">{{ icon('trash', 14) }} 删除</button>
-        </form>
-      {% endif %}
-    </div>
-  </article>
-  {% else %}
-  <div class="empty">还没有考试，点「新建考试」开始。</div>
-  {% endfor %}
+<div id="examMenu" class="modal-card" role="menu" aria-label="考试操作"
+     style="display:none;position:fixed;z-index:130;width:190px;padding:8px">
+  <b id="examMenuTitle" style="display:block;padding:6px 10px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></b>
+  <button class="btn sm ghost" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="edit">编辑 / 查看</button>
+  <button class="btn sm ghost" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="copy">复制为新考试</button>
+  <button class="btn sm ghost" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="scores">成绩详情</button>
+  <button class="btn sm ghost" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="review">试卷评讲</button>
+  <button class="btn sm ghost" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="export">导出考试</button>
+  <button class="btn sm green" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="start" hidden>开始考试</button>
+  <button class="btn sm orange" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="pause" hidden>暂停考试</button>
+  <button class="btn sm green" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="resume" hidden>恢复考试</button>
+  <button class="btn sm red" role="menuitem" style="width:100%;justify-content:flex-start" data-menu-action="stop" hidden>结束考试</button>
+  <button class="btn sm ghost" role="menuitem" style="width:100%;justify-content:flex-start;color:var(--danger)" data-menu-action="delete" hidden>删除考试</button>
 </div>
 
 <!-- 实时概览（ECharts）—— 放考试列表下面，
@@ -218,7 +309,18 @@ function doStop(clearLogin){
     </form>
     <a class="btn ghost sm" href="/students" title="到学生机页面管理全部记录">全部学生机</a>
   </h2>
-  <table>
+  <div class="scroll resizable-scroll" tabindex="0" aria-label="学生机状态，可横向滚动">
+  <table id="dashboard-students-table" class="resizable-table" data-resizable
+         data-table-key="dashboard-students" data-min-width="960" style="min-width:960px">
+    <colgroup>
+      <col style="width:80px" data-default-width="80" data-min-width="64">
+      <col style="width:140px" data-default-width="140" data-min-width="100">
+      <col style="width:190px" data-default-width="190" data-min-width="150">
+      <col style="width:150px" data-default-width="150" data-min-width="120">
+      <col style="width:130px" data-default-width="130" data-min-width="100">
+      <col style="width:110px" data-default-width="110" data-min-width="90">
+      <col style="width:150px" data-default-width="150" data-min-width="120">
+    </colgroup>
     <thead>
       <tr><th>座位</th><th>姓名</th><th>机器标识</th><th>IP</th><th>状态</th><th>在线</th><th>最后心跳</th></tr>
     </thead>
@@ -238,7 +340,256 @@ function doStop(clearLogin){
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
+
+<script>
+/* 考试列表：批量导出、复制、右键菜单与双击快捷操作 */
+var MENU_EXAM_ID = 0;
+var EXAM_CSRF = {{ csrf_token|tojson }};
+
+function postExamAction(url, message){
+  if(message && !confirm(message)) return;
+  var form = document.createElement('form');
+  form.method = 'post';
+  form.action = url;
+  var csrf = document.createElement('input');
+  csrf.type = 'hidden'; csrf.name = '_csrf'; csrf.value = EXAM_CSRF;
+  form.appendChild(csrf);
+  document.body.appendChild(form);
+  form.submit();
+}
+
+function updateExamSelection(){
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.exam-select'));
+  var ids = boxes.filter(function(box){ return box.checked; }).map(function(box){ return box.value; });
+  document.getElementById('selection-count').textContent = '已选 ' + ids.length + ' 场';
+  var all = document.getElementById('selectAllExams');
+  all.checked = boxes.length > 0 && ids.length === boxes.length;
+  all.indeterminate = ids.length > 0 && ids.length < boxes.length;
+}
+
+function toggleAllExams(checked){
+  var boxes = document.querySelectorAll('.exam-select');
+  for(var i=0;i<boxes.length;i++) boxes[i].checked = checked;
+  updateExamSelection();
+}
+
+function prepareBatchExport(){
+  var boxes = document.querySelectorAll('.exam-select');
+  var holder = document.getElementById('batchIds');
+  holder.innerHTML = '';
+  var count = 0;
+  for(var i=0;i<boxes.length;i++){
+    if(!boxes[i].checked) continue;
+    var input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'ids'; input.value = boxes[i].value;
+    holder.appendChild(input); count++;
+  }
+  if(!count){ alert('请先勾选要导出的考试'); return false; }
+  return true;
+}
+
+function closeExamMenu(){ document.getElementById('examMenu').style.display = 'none'; }
+
+function showExamMenu(event, id){
+  event.preventDefault();
+  closeExamMenu();
+  var card = document.querySelector('.exam-card[data-exam-id="' + id + '"]');
+  if(!card) return;
+  MENU_EXAM_ID = id;
+  var status = card.getAttribute('data-status');
+  var stopped = status === 'stopped';
+  var ready = card.getAttribute('data-ready') === 'true';
+  document.getElementById('examMenuTitle').textContent = card.getAttribute('data-title');
+  var visible = {
+    edit:true, copy:true, scores:true, review:true, export:true,
+    start:status === 'draft', pause:status === 'running', resume:status === 'paused',
+    stop:status === 'running' || status === 'paused', delete:status === 'draft'
+  };
+  var buttons = document.querySelectorAll('#examMenu [data-menu-action]');
+  for(var i=0;i<buttons.length;i++){
+    var action = buttons[i].getAttribute('data-menu-action');
+    buttons[i].hidden = !visible[action];
+    buttons[i].disabled = action === 'start' && !ready;
+    if(action === 'edit') buttons[i].textContent = stopped ? '查看总览' : '编辑考试';
+  }
+  var menu = document.getElementById('examMenu');
+  menu.style.display = 'block';
+  var left = Math.min(event.clientX, window.innerWidth - menu.offsetWidth - 8);
+  var top = Math.min(event.clientY, window.innerHeight - menu.offsetHeight - 8);
+  menu.style.left = Math.max(8, left) + 'px';
+  menu.style.top = Math.max(8, top) + 'px';
+}
+
+function runExamMenuAction(action){
+  var id = MENU_EXAM_ID;
+  var card = document.querySelector('.exam-card[data-exam-id="' + id + '"]');
+  var status = card ? card.getAttribute('data-status') : '';
+  closeExamMenu();
+  if(action === 'edit'){ location.href = '/exam/' + id + (status === 'stopped' ? '?tab=overview' : ''); }
+  else if(action === 'copy'){ postExamAction('/exam/' + id + '/copy', '复制这场考试为新考试？'); }
+  else if(action === 'scores'){ location.href = '/scores/' + id; }
+  else if(action === 'review'){ location.href = '/exam/' + id + '/review'; }
+  else if(action === 'export'){ location.href = '/exam/' + id + '/export'; }
+  else if(action === 'start'){ location.href = '/exam/' + id + '/start'; }
+  else if(action === 'pause'){ postExamAction('/exam/' + id + '/pause', '确定暂停这场考试？'); }
+  else if(action === 'resume'){ postExamAction('/exam/' + id + '/resume', '确定恢复这场考试？'); }
+  else if(action === 'stop'){ askStopExam(id); }
+  else if(action === 'delete'){ postExamAction('/exam/' + id + '/delete', '确定删除这场考试？不可恢复！'); }
+}
+
+function doubleClickExam(event, id){
+  if(event && event.target.closest('a, button, input, form, select, textarea')) return;
+  var card = document.querySelector('.exam-card[data-exam-id="' + id + '"]');
+  if(!card) return;
+  var status = card.getAttribute('data-status');
+  if(status === 'draft') location.href = '/exam/' + id;
+  else if(status === 'running') postExamAction('/exam/' + id + '/pause', '确定暂停这场考试？');
+  else if(status === 'paused') postExamAction('/exam/' + id + '/resume', '确定恢复这场考试？');
+  else if(status === 'stopped') location.href = '/scores/' + id;
+}
+
+/* 可拖动列宽 + 双击表头自适应；宽度按表格持久保存。 */
+function setupResizableTable(table){
+  if(table._resizableReady) return;
+  var cols = Array.prototype.slice.call(table.querySelectorAll('colgroup > col'));
+  var headers = Array.prototype.slice.call(table.querySelectorAll('thead th'));
+  if(!cols.length || cols.length !== headers.length) return;
+  var storageKey = 'ikeexam.table.' + (table.getAttribute('data-table-key') || table.id);
+  var minTable = parseInt(table.getAttribute('data-min-width'), 10) || 0;
+  var widths = cols.map(function(col){ return parseInt(col.getAttribute('data-default-width'), 10) || 100; });
+  try {
+    var saved = JSON.parse(localStorage.getItem(storageKey));
+    if(Array.isArray(saved) && saved.length === widths.length &&
+       saved.every(function(v){ return typeof v === 'number' && isFinite(v) && v >= 40; })){
+      widths = saved;
+    }
+  } catch(e){}
+  function minWidth(i){ return parseInt(cols[i].getAttribute('data-min-width'), 10) || 48; }
+  function maxWidth(i){ return parseInt(cols[i].getAttribute('data-max-width'), 10) || 900; }
+  function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
+  function sum(){ return widths.reduce(function(a, b){ return a + b; }, 0); }
+  function apply(persist){
+    var total = sum();
+    if(total < minTable) widths[widths.length - 1] += minTable - total;
+    cols.forEach(function(col, i){ col.style.width = widths[i] + 'px'; });
+    var available = table.parentElement ? table.parentElement.clientWidth : 0;
+    table.style.width = Math.max(sum(), available, minTable) + 'px';
+    table.style.minWidth = minTable + 'px';
+    handles.forEach(function(handle, i){
+      handle.setAttribute('aria-valuemin', minWidth(i));
+      handle.setAttribute('aria-valuemax', maxWidth(i));
+      handle.setAttribute('aria-valuenow', Math.round(widths[i]));
+    });
+    if(persist){
+      try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch(e){}
+    }
+  }
+  var probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none;';
+  document.body.appendChild(probe);
+  function fitColumn(index){
+    var wanted = minWidth(index);
+    Array.prototype.forEach.call(table.querySelectorAll('tr'), function(row){
+      var cell = row.cells[index];
+      if(!cell || cell.colSpan > 1) return;
+      var clone = cell.cloneNode(true);
+      clone.style.display = 'inline-block';
+      clone.style.width = 'auto';
+      clone.style.maxWidth = 'none';
+      clone.style.whiteSpace = 'nowrap';
+      Array.prototype.forEach.call(clone.querySelectorAll('[id]'), function(el){ el.removeAttribute('id'); });
+      probe.appendChild(clone);
+      wanted = Math.max(wanted, Math.ceil(clone.getBoundingClientRect().width) + 4);
+      clone.parentNode.removeChild(clone);
+    });
+    widths[index] = clamp(wanted, minWidth(index), maxWidth(index));
+    apply(true);
+  }
+  function resizePair(index, delta, persist){
+    var next = index + 1;
+    if(next >= widths.length) return;
+    var target = clamp(widths[index] + delta, minWidth(index), maxWidth(index));
+    var applied = target - widths[index];
+    var nextTarget = clamp(widths[next] - applied, minWidth(next), maxWidth(next));
+    applied = widths[next] - nextTarget;
+    widths[index] = clamp(widths[index] + applied, minWidth(index), maxWidth(index));
+    widths[next] = nextTarget;
+    apply(persist);
+  }
+  var handles = [];
+  headers.forEach(function(header, index){
+    if(index === headers.length - 1) return;
+    var handle = document.createElement('span');
+    handle.className = 'col-resizer';
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', (header.textContent || '').trim() + '列宽，拖动或双击自适应');
+    handle.setAttribute('title', '拖动调整列宽；双击自动适配');
+    handle.tabIndex = 0;
+    header.appendChild(handle);
+    handles[index] = handle;
+    handle.addEventListener('pointerdown', function(event){
+      if(event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      widths = headers.map(function(th){ return th.getBoundingClientRect().width; });
+      apply(false);
+      var lastX = event.clientX;
+      handle.classList.add('active');
+      table.classList.add('is-resizing');
+      document.body.classList.add('table-resizing');
+      handle.setPointerCapture(event.pointerId);
+      function move(ev){
+        if(ev.pointerId !== event.pointerId) return;
+        resizePair(index, ev.clientX - lastX, false);
+        lastX = ev.clientX;
+      }
+      function end(){
+        handle.classList.remove('active');
+        table.classList.remove('is-resizing');
+        document.body.classList.remove('table-resizing');
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+        apply(true);
+      }
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    });
+    handle.addEventListener('dblclick', function(event){
+      event.preventDefault(); event.stopPropagation(); fitColumn(index);
+    });
+    handle.addEventListener('keydown', function(event){
+      if(event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      resizePair(index, event.key === 'ArrowRight' ? 10 : -10, true);
+    });
+  });
+  table.addEventListener('dblclick', function(event){
+    var th = event.target.closest('thead th');
+    if(!th || event.target.closest('.col-resizer')) return;
+    fitColumn(headers.indexOf(th));
+  });
+  window.addEventListener('resize', function(){ apply(false); });
+  table._resizableReady = true;
+  apply(false);
+}
+function enableResizableTables(){
+  document.querySelectorAll('table[data-resizable]').forEach(setupResizableTable);
+}
+
+document.addEventListener('click', function(event){
+  var item = event.target.closest('#examMenu [data-menu-action]');
+  if(item && !item.disabled){ runExamMenuAction(item.getAttribute('data-menu-action')); return; }
+  if(!event.target.closest('#examMenu')) closeExamMenu();
+});
+window.addEventListener('resize', closeExamMenu);
+window.addEventListener('scroll', closeExamMenu, true);
+updateExamSelection();
+enableResizableTables();
+</script>
 
 <script>
 /* 自动刷新：每 3 秒拉取学生状态 */

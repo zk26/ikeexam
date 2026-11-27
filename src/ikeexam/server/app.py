@@ -169,8 +169,9 @@ def _secret_key():
 
 
 app.secret_key = _secret_key()
-# 登录会话 8 小时有效
-app.permanent_session_lifetime = 8 * 3600
+ADMIN_SESSION_SECONDS = 24 * 3600
+FINAL_SUBMIT_GRACE_SECONDS = 5 * 60
+app.permanent_session_lifetime = ADMIN_SESSION_SECONDS
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024   # 单文件 100MB
 # 会话 Cookie 加固：SameSite=Lax 可拦下大多数跨站 POST（配合下面的 CSRF token）
 app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -211,6 +212,13 @@ def _inject():
         out["csrf_token"] = _csrf_token()
     except Exception:
         out["csrf_token"] = ""
+    out["session_expires_in"] = 0
+    try:
+        if _admin_session_active():
+            remaining = ADMIN_SESSION_SECONDS - (time.time() - float(session["at"]))
+            out["session_expires_in"] = max(0, int(remaining))
+    except (KeyError, TypeError, ValueError):
+        pass
     return out
 
 
@@ -294,6 +302,18 @@ def _student_auth(d=None):
     return host, db.get_student(host), None
 
 
+def _student_write_allowed(ex):
+    """考试进行中可写；老师收卷后给客户端 5 分钟完成最终上传。"""
+    if ex.get("status") in ("running", "paused"):
+        return True
+    if ex.get("status") != "stopped":
+        return False
+    try:
+        return time.time() <= float(ex.get("stop_at") or 0) + FINAL_SUBMIT_GRACE_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
 # ==================== 老师端登录保护 ====================
 #
 # 学生端 API（/api/*）不设防 —— 学生机不登录也要能答题。
@@ -321,13 +341,23 @@ LOGIN_EXEMPT_EXACT = (
 auth.ensure()
 
 
+def _admin_session_active():
+    if not session.get("admin"):
+        return False
+    if session.get("auth_at") != auth.updated_at():
+        return False
+    try:
+        return time.time() < float(session.get("at", 0)) + ADMIN_SESSION_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
 @app.before_request
 def _require_login():
+    if _admin_session_active():
+        return None
     if session.get("admin"):
-        if session.get("auth_at") != auth.updated_at():
-            session.clear()
-        else:
-            return None
+        session.clear()
     path = request.path
     if path in LOGIN_EXEMPT_EXACT:
         return None
@@ -353,9 +383,11 @@ def _csrf_protect():
     if request.path.startswith("/api/"):
         return None
     if request.path.startswith("/admin_api/"):
-        if request.path in ("/admin_api/login", "/admin_api/setup", "/admin_api/logout",
-                        "/admin_api/passwordless"):
+        if request.path in ("/admin_api/login", "/admin_api/setup", "/admin_api/logout"):
             return None
+        if not _admin_session_active():
+            session.clear()
+            return jsonify({"ok": False, "msg": "登录已失效，请重新登录"}), 401
         token = session.get("_csrf")
         sent = request.headers.get("X-CSRF-Token", "")
         if not token or not sent or not secrets.compare_digest(token, sent):
@@ -379,11 +411,6 @@ def _safe_next(target):
 def _setup_allowed():
     return (request.remote_addr in ("127.0.0.1", "::1")
             or os.environ.get("EXAM_ALLOW_REMOTE_SETUP") == "1")
-
-
-def _local_admin_request():
-    return (request.remote_addr in ("127.0.0.1", "::1")
-            and request.headers.get("X-ikeexam-Local") == "1")
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -520,17 +547,7 @@ for _i in range(2):
 def admin_api_ping():
     """探活 + 是否需首次设密（桌面老师端启动时先调这个）"""
     return jsonify({"ok": True, "name": "ikee考务中心", "version": "2.1.1",
-                    "setup": auth.needs_setup(),
-                    "passwordless_local": auth.passwordless_local()})
-
-
-@app.route("/admin_api/passwordless", methods=["POST"])
-def admin_api_passwordless():
-    if not _local_admin_request():
-        return jsonify({"ok": False, "msg": "本机免密码仅允许在服务器本机开启"}), 403
-    data = request.get_json(silent=True) or {}
-    auth.set_passwordless(bool(data.get("enabled")))
-    return jsonify({"ok": True, "passwordless_local": auth.passwordless_local()})
+                    "setup": auth.needs_setup()})
 
 
 @app.route("/admin_api/about")
@@ -565,25 +582,27 @@ def admin_api_setup():
 def admin_api_login():
     d = request.get_json(silent=True) or {}
     pwd = (d.get("password") or "").strip()
-    local_passwordless = (not pwd and auth.passwordless_local()
-                          and request.remote_addr in ("127.0.0.1", "::1"))
-    if not local_passwordless:
-        left = auth.locked()
-        if left:
-            return jsonify({"ok": False, "msg": f"尝试过多，{left} 秒后再试"}), 429
-        if not auth.verify(pwd):
-            auth.note_fail()
-            return jsonify({"ok": False, "msg": "密码错误"}), 401
+    left = auth.locked()
+    if left:
+        return jsonify({"ok": False, "msg": f"尝试过多，{left} 秒后再试"}), 429
+    if not auth.verify(pwd):
+        auth.note_fail()
+        return jsonify({"ok": False, "msg": "密码错误"}), 401
     auth.note_ok()
     session.permanent = True
     session["admin"] = True
+    session["at"] = int(time.time())
     session["auth_at"] = auth.updated_at()
-    return jsonify({"ok": True, "csrf_token": _csrf_token()})
+    return jsonify({"ok": True, "csrf_token": _csrf_token(),
+                    "expires_in": ADMIN_SESSION_SECONDS})
 
 
 def _admin_ok():
     """管理员接口内部认证：桌面客户端登录后 session 会带 admin"""
-    return bool(session.get("admin"))
+    if not _admin_session_active():
+        session.clear()
+        return False
+    return True
 
 
 @app.route("/admin_api/exams")
@@ -737,6 +756,15 @@ def _question_payload(data, current=None):
             pairs = [f"{i + 1}:{x}" for i, x in enumerate(plain)]
         if len(pairs) != len(slots):
             raise ValueError("拖拽题答案段数必须与槽位数一致")
+        old_layout = "grid"
+        try:
+            old_layout = (json.loads(old.get("payload") or "{}").get("layout")
+                          or "grid")
+        except (TypeError, ValueError, AttributeError):
+            pass
+        layout = str(d.get("layout") or old_layout or "grid").lower()
+        if layout not in ("grid", "horizontal"):
+            layout = "grid"
         answer = "|".join(pairs)
     return {
         "qtype": qtype, "stem": stem, "options": opts, "answer": answer,
@@ -750,7 +778,8 @@ def _question_payload(data, current=None):
                       if qtype == "code" else "",
         "expected_output": str(d.get("expected_output", old.get("expected_output", "")) or "")
                            if qtype == "code" else "",
-        "payload": json.dumps({"slots": slots}, ensure_ascii=False) if qtype == "drag" else "",
+        "payload": json.dumps({"slots": slots, "layout": layout}, ensure_ascii=False)
+                   if qtype == "drag" else "",
     }
 
 
@@ -789,12 +818,23 @@ def _validate_material_names(materials):
     return out
 
 
+def _practice_material_names(eid, pids=None):
+    if pids is None:
+        pids = [task["id"] for task in db.exam_tasks(eid)]
+    names = set()
+    for pid in pids:
+        task = db.get_practice(pid)
+        if task:
+            names.update(task.get("materials") or [])
+    return names
+
+
 def _save_exam_config(eid, data, creating=False):
     ex = db.get_exam(eid)
     if not ex:
         raise ValueError("考试不存在")
-    if ex["status"] in ("running", "paused"):
-        raise ValueError("考试进行中，配置已锁定")
+    if ex["status"] in ("running", "paused", "stopped"):
+        raise ValueError("考试进行中或已结束，配置已锁定")
     title = str(data.get("title", ex["title"]) or "").strip()
     if not title:
         raise ValueError("考试名称不能为空")
@@ -846,6 +886,8 @@ def _save_exam_config(eid, data, creating=False):
         raise ValueError("试卷中包含不存在的题目")
     if pids is not None and any(not db.get_practice(pid) for pid in pids):
         raise ValueError("考试中包含不存在的实操题")
+    used_materials = _practice_material_names(eid, pids)
+    materials = [name for name in materials if name not in used_materials]
     db.update_exam(eid, {
         "title": title, "etype": str(etype or ""), "duration": duration,
         "theory_duration": theory_duration,
@@ -891,6 +933,8 @@ def admin_api_dashboard():
                             if os.path.isfile(os.path.join(MATERIAL_DIR, f)))
                     if os.path.isdir(MATERIAL_DIR) else [],
         "qimgs": _qimg_list(), "practice_filters": db.practice_filters(),
+        "typing_passages": _load_typing_passages(),
+        "typing_passages_en": _load_typing_passages("小学英语打字范文.json"),
     })
 
 
@@ -952,8 +996,8 @@ def admin_api_exam_detail(eid):
             "stats": db.stats(eid),
         })
     if request.method == "DELETE":
-        if ex["status"] in ("running", "paused"):
-            return _admin_fail("请先结束考试再删除")
+        if ex["status"] in ("running", "paused", "stopped"):
+            return _admin_fail("进行中或已结束的考试不能删除")
         db.delete_exam(eid)
         return jsonify({"ok": True})
     try:
@@ -963,6 +1007,67 @@ def admin_api_exam_detail(eid):
     return jsonify({"ok": True, "exam": ex})
 
 
+def _copy_exam_config(eid):
+    """复制考试配置为新未开始考试；网页与桌面 API 共用同一套逻辑。"""
+    ex = db.get_exam(eid)
+    if not ex:
+        raise ValueError("考试不存在")
+    try:
+        materials = json.loads(ex.get("materials") or "[]")
+    except (TypeError, ValueError):
+        materials = []
+    try:
+        checks = json.loads(ex.get("checks") or "[]")
+    except (TypeError, ValueError):
+        checks = []
+    if not isinstance(materials, list):
+        materials = []
+    if not isinstance(checks, list):
+        checks = []
+    new_id = db.create_exam({
+        "title": f"{ex['title']}-副本",
+        "etype": ex.get("etype") or "",
+        "duration": ex.get("duration") or 60,
+        "theory_duration": ex.get("duration") or 60,
+        "requirement": ex.get("requirement") or "",
+        "materials": materials,
+        "save_as": "",
+        "checks": checks,
+        "require_complete": bool(ex.get("require_complete")),
+        "passwordless": bool(ex.get("passwordless")),
+        "klass": ex.get("klass") or "",
+    })
+    # create_exam 的旧 INSERT 未包含 finish_note，复制时显式补齐。
+    db.update_exam(new_id, {"finish_note": ex.get("finish_note") or ""})
+    db.set_question_types(new_id, _selected_types(ex))
+    db.set_exam_questions(new_id, db.exam_question_ids(eid))
+    for task in db.exam_tasks(eid):
+        db.add_task_to_exam(new_id, task["id"])
+    db.set_roster(new_id, db.roster_text_of(eid))
+    db.set_typing_config(new_id, _typing_config_of(ex))
+    # 用表单配置而非下发配置，关闭画图题型时也能保留老师以前填的内容。
+    db.set_drawing_config(new_id, _drawing_form_cfg(ex))
+    db.invalidate()
+    return new_id
+
+
+@app.route("/admin_api/exam/<int:eid>/copy", methods=["POST"])
+def admin_api_exam_copy(eid):
+    if not _admin_ok():
+        return _admin_fail("未登录", 401)
+    ex, error = _admin_exam_or_404(eid)
+    if error:
+        return error
+    try:
+        new_id = _copy_exam_config(eid)
+    except ValueError as exc:
+        return _admin_fail(str(exc))
+    except Exception:
+        app.logger.exception("复制考试失败")
+        return _admin_fail("复制考试失败，请查看服务器日志", 500)
+    return jsonify({"ok": True, "exam": db.get_exam(new_id)})
+
+
 @app.route("/admin_api/exam/<int:eid>/questions", methods=["POST"])
 def admin_api_exam_questions(eid):
     if not _admin_ok():
@@ -970,8 +1075,8 @@ def admin_api_exam_questions(eid):
     ex, error = _admin_exam_or_404(eid)
     if error:
         return error
-    if ex["status"] in ("running", "paused"):
-        return _admin_fail("考试进行中，试卷已锁定")
+    if ex["status"] in ("running", "paused", "stopped"):
+        return _admin_fail("考试进行中或已结束，试卷已锁定")
     qids = _clean_id_list((request.get_json(silent=True) or {}).get("question_ids"))
     if any(not db.get_question(qid) for qid in qids):
         return _admin_fail("包含不存在的题目")
@@ -987,8 +1092,8 @@ def admin_api_exam_practice(eid):
     ex, error = _admin_exam_or_404(eid)
     if error:
         return error
-    if ex["status"] in ("running", "paused"):
-        return _admin_fail("考试进行中，实操题已锁定")
+    if ex["status"] in ("running", "paused", "stopped"):
+        return _admin_fail("考试进行中或已结束，实操题已锁定")
     pids = _clean_id_list((request.get_json(silent=True) or {}).get("practice_ids"))
     if any(not db.get_practice(pid) for pid in pids):
         return _admin_fail("包含不存在的实操题")
@@ -1009,6 +1114,8 @@ def admin_api_exam_roster(eid):
     ex, error = _admin_exam_or_404(eid)
     if error:
         return error
+    if ex["status"] == "stopped":
+        return _admin_fail("已结束考试为只读，名单已锁定")
     data = request.get_json(silent=True) or {}
     rows = _roster_rows(data.get("text", ""))
     if data.get("mode") == "append":
@@ -1029,8 +1136,8 @@ def admin_api_exam_material_upload(eid):
     ex, error = _admin_exam_or_404(eid)
     if error:
         return error
-    if ex["status"] in ("running", "paused"):
-        return _admin_fail("考试进行中，素材已锁定")
+    if ex["status"] in ("running", "paused", "stopped"):
+        return _admin_fail("考试进行中或已结束，素材已锁定")
     f = request.files.get("file")
     if not f or not f.filename:
         return _admin_fail("请选择素材文件")
@@ -1044,6 +1151,8 @@ def admin_api_exam_material_upload(eid):
     elif ext not in (".pdf", ".txt", ".csv"):
         return _admin_fail("不支持的素材类型")
     safe = _safe_name(f.filename, "material" + ext)
+    if safe in _practice_material_names(eid):
+        return _admin_fail("该素材已属于本场实操题，无需重复添加到考试素材")
     dest = os.path.join(MATERIAL_DIR, safe)
     f.save(dest)
     files = json.loads(ex.get("materials") or "[]")
@@ -1060,8 +1169,8 @@ def admin_api_exam_material_delete(eid, name):
     ex, error = _admin_exam_or_404(eid)
     if error:
         return error
-    if ex["status"] in ("running", "paused"):
-        return _admin_fail("考试进行中，素材已锁定")
+    if ex["status"] in ("running", "paused", "stopped"):
+        return _admin_fail("考试进行中或已结束，素材已锁定")
     safe = os.path.basename(name)
     files = [x for x in json.loads(ex.get("materials") or "[]") if x != safe]
     db.update_exam(eid, {"materials": files})
@@ -1081,6 +1190,8 @@ def admin_api_exam_start(eid):
     ex, error = _admin_exam_or_404(eid)
     if error:
         return error
+    if ex["status"] == "stopped":
+        return _admin_fail("已结束考试只能查看和导出，请复制后开启新考试")
     if ex["status"] in ("running", "paused"):
         return _admin_fail("考试已经在进行中")
     other = db.active_exam()
@@ -1160,6 +1271,7 @@ def admin_api_exam_stop(eid):
     if ex["status"] not in ("running", "paused"):
         return _admin_fail("考试未在进行")
     clear_login = bool((request.get_json(silent=True) or {}).get("clear_login"))
+    db.snapshot_exam_students(eid)
     db.set_exam_status(eid, "stopped")
     db.set_phase(eid, "ended")
     db.push_command("all", "force_exit", {"exam_id": eid, "clear_login": clear_login})
@@ -1211,6 +1323,69 @@ def admin_api_exam_export(eid):
     return response
 
 
+def _batch_exams_xlsx_response(ids):
+    """把多场考试的成绩合并为一个 xlsx，每场考试一个 sheet。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    exams = [(eid, db.get_exam(eid)) for eid in ids]
+    exams = [(eid, exam) for eid, exam in exams if exam]
+    if not exams:
+        return None
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    used_names = set()
+    for eid, exam in exams:
+        base_name = re.sub(r"[\\/*?:\[\]\x00-\x1f]", "_",
+                           exam.get("title") or f"考试{eid}").strip().strip("'")[:31]
+        sheet_name = base_name or f"考试{eid}"
+        suffix = 2
+        while sheet_name.casefold() in used_names:
+            tail = f"-{suffix}"
+            sheet_name = base_name[:31 - len(tail)] + tail
+            suffix += 1
+        used_names.add(sheet_name.casefold())
+        sheet = workbook.create_sheet(sheet_name)
+        sheet.append(["座位号", "姓名", "机器标识", "IP", "理论题", "理论满分",
+                      "实操题", "实操满分", "总分", "已交卷", "答卷文件"])
+        for row in db.full_report(eid):
+            sheet.append([
+                row.get("seat") or "", row.get("name") or "", row.get("hostname") or "",
+                row.get("ip") or "", row.get("theory"), row.get("theory_full"),
+                row.get("practice") if row.get("practice") is not None else "",
+                row.get("practice_full"), row.get("total"),
+                "是" if row.get("submitted") else "否", row.get("filename") or "",
+            ])
+        for cell in sheet[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="27324A")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        sheet.sheet_view.showGridLines = False
+        for index, width in enumerate((10, 14, 20, 14, 9, 9, 9, 9, 9, 9, 34), 1):
+            sheet.column_dimensions[get_column_letter(index)].width = width
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name="多场考试成绩.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/admin_api/exams/export", methods=["POST"])
+def admin_api_exams_export():
+    if not _admin_ok():
+        return _admin_fail("未登录", 401)
+    ids = _clean_id_list((request.get_json(silent=True) or {}).get("ids"))
+    if not ids:
+        return _admin_fail("请先选择要导出的考试")
+    response = _batch_exams_xlsx_response(ids)
+    if response is None:
+        return _admin_fail("选择的考试不存在", 404)
+    return response
+
+
 @app.route("/admin_api/exam/<int:eid>/regrade", methods=["POST"])
 def admin_api_exam_regrade(eid):
     if not _admin_ok():
@@ -1218,6 +1393,8 @@ def admin_api_exam_regrade(eid):
     ex, error = _admin_exam_or_404(eid)
     if error:
         return error
+    if ex["status"] == "stopped":
+        return _admin_fail("已结束考试只能查看和导出")
     n = 0
     for s in db.list_submissions(eid):
         if s["saved_path"] and os.path.isfile(s["saved_path"]):
@@ -1233,6 +1410,8 @@ def admin_api_exam_rejudge(eid):
     _ex, error = _admin_exam_or_404(eid)
     if error:
         return error
+    if _ex["status"] == "stopped":
+        return _admin_fail("已结束考试只能查看和导出")
     n, ok = db.rejudge_code_answers(eid)
     return jsonify({"ok": True, "count": n, "correct": ok})
 
@@ -1706,10 +1885,12 @@ def api_paper():
             # 拖拽题：把槽位下发（拖拽项就是 options；答案不下发）
             elif q["qtype"] == "drag":
                 try:
-                    item["slots"] = (json.loads(q.get("payload") or "{}")
-                                     .get("slots") or [])
+                    drag_payload = json.loads(q.get("payload") or "{}")
+                    item["slots"] = drag_payload.get("slots") or []
+                    item["layout"] = drag_payload.get("layout") or "grid"
                 except (TypeError, ValueError):
                     item["slots"] = []
+                    item["layout"] = "grid"
             items.append(item)
         return items
 
@@ -1742,14 +1923,11 @@ def api_theory_submit():
         return jsonify({"ok": False, "msg": "参数不全"}), 400
 
     ex = db.get_exam(int(eid))
-    if not ex or ex["status"] not in ("running", "paused"):
-        return jsonify({"ok": False, "msg": "考试未在进行"}), 403
+    if not ex or not _student_write_allowed(ex):
+        return jsonify({"ok": False, "msg": "考试未在进行或最终收卷时间已过"}), 403
 
-    # 阶段校验：进入实操/结束后拒绝补交理论题
-    if db.get_phase(int(eid)) in ("practice", "ended"):
-        return jsonify({"ok": False, "msg": "已进入实操阶段，理论题不能补交"}), 403
-
-    # 一个事务批量写入（学生端每 10 秒交一批，逐条写太慢）
+    # 学生可以在理论/实操导航间来回检查，只要考试仍在进行就允许保存理论答案。
+    # 已结束考试仍拒绝写入，成绩单保持锁定。
     pid, msg = _write_participant(int(eid), host, "working")
     if not pid:
         return jsonify({"ok": False, "msg": msg}), 403
@@ -1767,9 +1945,9 @@ def api_theory_finish():
         return jsonify({"ok": False, "msg": err}), 403
     eid = _int_field(d.get("exam_id"))
     ex = db.get_exam(eid)
-    if not ex or ex["status"] not in ("running", "paused"):
-        return jsonify({"ok": False, "msg": "考试未在进行"}), 403
-    if db.get_phase(eid) in ("practice", "ended"):
+    if not ex or not _student_write_allowed(ex):
+        return jsonify({"ok": False, "msg": "考试未在进行或最终收卷时间已过"}), 403
+    if ex["status"] != "stopped" and db.get_phase(eid) in ("practice", "ended"):
         return jsonify({"ok": False, "msg": "当前阶段不能交理论卷"}), 403
     pid, msg = _write_participant(eid, host, "theory_done")
     if not pid:
@@ -1799,8 +1977,8 @@ def api_typing_report():
         return jsonify({"ok": False, "msg": "reports 格式不对"}), 400
 
     ex = db.get_exam(int(eid))
-    if not ex or ex["status"] not in ("running", "paused"):
-        return jsonify({"ok": False, "msg": "考试未在进行"}), 403
+    if not ex or not _student_write_allowed(ex):
+        return jsonify({"ok": False, "msg": "考试未在进行或最终收卷时间已过"}), 403
     if "typing" not in _selected_types(ex):
         return jsonify({"ok": False, "msg": "本场考试没有打字题"}), 403
 
@@ -1891,9 +2069,9 @@ def api_upload():
         return jsonify({"ok": False, "msg": "考试不存在"}), 404
 
     # 状态/阶段校验：未开考或已结束都不能再提交答卷（对齐理论题提交的校验）
-    if ex["status"] not in ("running", "paused"):
-        return jsonify({"ok": False, "msg": "考试未在进行，不能提交答卷"}), 403
-    if db.get_phase(eid) == "ended":
+    if not _student_write_allowed(ex):
+        return jsonify({"ok": False, "msg": "考试未在进行或最终收卷时间已过，不能提交答卷"}), 403
+    if ex["status"] != "stopped" and db.get_phase(eid) == "ended":
         return jsonify({"ok": False, "msg": "考试已结束，不能再提交答卷"}), 403
 
     # 机器令牌已验证，来源 IP 仅记录，不再作为唯一防伪手段。
@@ -1977,9 +2155,9 @@ def api_drawing_upload():
         tag_no = "拼豆" if kind == "beads" else "画板"
         return jsonify({"ok": False,
                         "msg": f"本场考试没有这道画图小题（{tag_no}）"}), 403
-    if ex["status"] not in ("running", "paused"):
-        return jsonify({"ok": False, "msg": "考试未在进行，不能提交"}), 403
-    if db.get_phase(eid) == "ended":
+    if not _student_write_allowed(ex):
+        return jsonify({"ok": False, "msg": "考试未在进行或最终收卷时间已过，不能提交"}), 403
+    if ex["status"] != "stopped" and db.get_phase(eid) == "ended":
         return jsonify({"ok": False, "msg": "考试已结束，不能再提交"}), 403
     pid, msg = _write_participant(eid, host, "working")
     if not pid:
@@ -2023,9 +2201,9 @@ def api_upload_empty():
     ex = db.get_exam(eid)
     if not ex:
         return jsonify({"ok": False, "msg": "考试不存在"}), 404
-    if ex["status"] not in ("running", "paused"):
-        return jsonify({"ok": False, "msg": "考试未在进行，不能提交答卷"}), 403
-    if db.get_phase(eid) == "ended":
+    if not _student_write_allowed(ex):
+        return jsonify({"ok": False, "msg": "考试未在进行或最终收卷时间已过，不能提交答卷"}), 403
+    if ex["status"] != "stopped" and db.get_phase(eid) == "ended":
         return jsonify({"ok": False, "msg": "考试已结束，不能再提交答卷"}), 403
     if task_id and not db.task_in_exam(eid, task_id):
         return jsonify({"ok": False, "msg": "这道操作题不属于本场考试"}), 400
@@ -2108,6 +2286,42 @@ def index():
                            stats=st, theory_n=theory_n,
                            remaining=db.phase_remaining(ex["id"]) if ex else None,
                            type_name=TYPE_NAME)
+
+
+@app.route("/exam/<int:eid>/copy", methods=["POST"])
+def exam_copy(eid):
+    """网页控制台复制考试；沿用桌面 API 的配置复制逻辑。"""
+    ex = db.get_exam(eid)
+    if not ex:
+        flash("考试不存在", "err")
+        return redirect(url_for("index"))
+    try:
+        new_id = _copy_exam_config(eid)
+    except ValueError as exc:
+        flash(str(exc), "err")
+        return redirect(url_for("index"))
+    except Exception:
+        app.logger.exception("网页复制考试失败")
+        flash("复制考试失败，请查看服务器日志", "err")
+        return redirect(url_for("index"))
+    new_ex = db.get_exam(new_id)
+    flash(f"已复制为「{new_ex['title']}」，可直接编辑后开考")
+    db.log("teacher", "info", f"复制考试 #{eid} → #{new_id}")
+    return redirect(url_for("index"))
+
+
+@app.route("/exams/export", methods=["POST"])
+def exams_batch_export():
+    """网页控制台批量导出：一个 xlsx，每场考试一个成绩 sheet。"""
+    ids = _clean_id_list(request.form.getlist("ids"))
+    if not ids:
+        flash("请先勾选要导出的考试", "err")
+        return redirect(url_for("index"))
+    response = _batch_exams_xlsx_response(ids)
+    if response is None:
+        flash("选择的考试不存在", "err")
+        return redirect(url_for("index"))
+    return response
 
 
 # ---------------- 公开大屏（免登录，投屏用） ----------------
@@ -2816,6 +3030,24 @@ def _has_rules(blob):
     return bool(txt) and txt not in ("[]", "{}")
 
 
+def _checks_total(checks):
+    """评分规则总分；兼容 JSON 字符串并跳过损坏的旧规则。"""
+    if isinstance(checks, str):
+        try:
+            checks = json.loads(checks or "[]")
+        except (TypeError, ValueError):
+            return 0.0
+    if not isinstance(checks, list):
+        return 0.0
+    total = 0.0
+    for rule in checks:
+        try:
+            total += float((rule or {}).get("score") or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return round(total, 2)
+
+
 def _exam_content(ex):
     """
     这场考试到底有没有内容。
@@ -2930,9 +3162,10 @@ def exam_edit(eid):
     if request.method == "POST":
         # 考试进行中（含暂停）不允许保存改动：
         # 改时长会直接把倒计时算歪，改题目/素材会让学生手里的卷子和服务器对不上
-        if ex["status"] in ("running", "paused"):
-            flash(f"「{ex['title']}」正在进行中，配置不能改。"
-                  f"请先「结束考试」，考完再改。", "err")
+        if ex["status"] in ("running", "paused", "stopped"):
+            state = "已结束" if ex["status"] == "stopped" else "正在进行或已暂停"
+            flash(f"「{ex['title']}」{state}，配置不能改。"
+                  f"已结束考试只读，可查看成绩、评讲或导出。", "err")
             return redirect(url_for("index"))
         files = json.loads(ex["materials"] or "[]")
         # 素材上传（文件名里的空格/#/? 会让下载链接断开，一并换成下划线）
@@ -3028,6 +3261,7 @@ def exam_edit(eid):
 
     qs = db.get_exam_questions(eid)
     allq = db.list_questions()
+    qsum = round(sum(float(q["score"] or 0) for q in qs), 2)
     tab = request.args.get("tab", "")
     sel = _selected_types(ex)
     try:
@@ -3038,14 +3272,23 @@ def exam_edit(eid):
         checks_list = []
     # 全部题型都做成标签页（老师要求「题型设置都在上面」），
     # 勾选开关搬进了每个题型页开头；没勾的只是不下发给学生
+    tasks = db.exam_tasks(eid)
+    practice_n = len(tasks) or (1 if checks_list else 0)
+    practice_full = (round(sum(_checks_total(t.get("checks")) for t in tasks), 2)
+                     if tasks else _checks_total(checks_list))
+    total_full = round(qsum + practice_full, 2)
     return render_template("exam_edit.html", exam=ex, questions=qs, qs=qs,
                            allq=allq,
                            categories=db.list_categories(),
                            type_name=TYPE_NAME,
                            qtype_cn=QTYPE_CN,
-                           qsum=round(sum(float(q["score"] or 0) for q in qs), 2),
+                           qsum=qsum,
                            theory_full=db.exam_theory_full(eid),
-                           tasks=db.exam_tasks(eid),
+                           practice_n=practice_n,
+                           practice_full=practice_full,
+                           total_full=total_full,
+                           config_locked=ex["status"] in ("running", "paused", "stopped"),
+                           tasks=tasks,
                            active_tab=tab,
                            sel_types=sel,
                            show_practice=("practice" in sel),
@@ -3063,6 +3306,7 @@ def exam_edit(eid):
                                "小学英语打字范文.json"),
                            typing_kb=_keyboard_layout(),
                            practice_types=_practice_types_of(ex),
+                           checks_total=_checks_total,
                            rule_types=RULE_TYPES, checks_list=checks_list)
 
 
@@ -3072,9 +3316,9 @@ def _paper_locked(ex):
     改了会直接串味：学生端手里的题号、题量、满分跟服务器对不上，
     已经答到第 10 题的人忽然发现卷子只剩 8 题，答案全错位。
     """
-    if ex and ex["status"] in ("running", "paused"):
-        flash(f"「{ex['title']}」正在进行中，不能改试卷。"
-              f"要改请先「结束考试」，考完再改。", "err")
+    if ex and ex["status"] in ("running", "paused", "stopped"):
+        state = "已结束，试卷只读" if ex["status"] == "stopped" else "正在进行或已暂停，试卷已锁定"
+        flash(f"「{ex['title']}」{state}。已结束考试可查看成绩、评讲或导出。", "err")
         return True
     return False
 
@@ -3088,6 +3332,23 @@ def _clean_type_question_ids(qtype, values):
             return None, "包含不存在的题目"
         if question["qtype"] == qtype and qid not in qids:
             qids.append(qid)
+    return qids, ""
+
+
+def _submitted_type_question_ids(qtype):
+    """读取网页选题；qids_order 优先，保证右侧显示顺序就是保存后的顺序。"""
+    qids, error = _clean_type_question_ids(qtype, request.form.getlist("qids"))
+    if error:
+        return None, error
+    order_key = f"qids_order_{qtype}"
+    if order_key in request.form or "qids_order" in request.form:
+        raw_order = request.form.get(order_key, request.form.get("qids_order", ""))
+        ordered, order_error = _clean_type_question_ids(qtype, raw_order.split(","))
+        if order_error:
+            return None, order_error
+        # 顺序字段不能偷偷加入未勾选的题；不一致时回退到复选框列表。
+        if set(ordered) == set(qids):
+            return ordered, ""
     return qids, ""
 
 
@@ -3110,7 +3371,7 @@ def exam_save_type_questions(eid, qtype):
         return redirect(url_for("exam_edit", eid=eid, tab="basic"))
     if _paper_locked(ex):
         return redirect(url_for("exam_edit", eid=eid, tab=qtype))
-    qids, error = _clean_type_question_ids(qtype, request.form.getlist("qids"))
+    qids, error = _submitted_type_question_ids(qtype)
     if error:
         flash(error, "err")
     else:
@@ -3176,8 +3437,8 @@ def exam_quickset(eid):
     ex = db.get_exam(eid)
     if not ex:
         return {"ok": False, "msg": "考试不存在"}
-    if ex["status"] in ("running", "paused"):
-        return {"ok": False, "msg": "考试进行中，配置已锁定"}
+    if ex["status"] in ("running", "paused", "stopped"):
+        return {"ok": False, "msg": "考试进行中或已结束，配置已锁定"}
     data = request.get_json(silent=True) or {}
     types = [t for t in (data.get("types") or []) if t in ALL_TYPES]
     if not types:
@@ -3245,7 +3506,7 @@ def exam_random(eid):
     if qtype in THEORY_TYPES:
         # 勾选后还没点「保存选题」就随机抽题，也不能丢掉这些待保存题。
         if request.form.get("selection_present") == "1":
-            qids, error = _clean_type_question_ids(qtype, request.form.getlist("qids"))
+            qids, error = _submitted_type_question_ids(qtype)
             if error:
                 flash(error, "err")
                 return redirect(url_for("exam_edit", eid=eid, tab=tab))
@@ -3275,6 +3536,8 @@ def exam_del_material(eid, name):
     if not ex:
         flash("考试不存在", "err")
         return redirect(url_for("index"))
+    if _paper_locked(ex):
+        return redirect(url_for("exam_edit", eid=eid, tab="practice"))
     files = json.loads(ex["materials"] or "[]")
     files = [f for f in files if f != name]
     c = db.conn()
@@ -3323,6 +3586,9 @@ def exam_start(eid):
         flash("考试不存在", "err")
         return redirect(url_for("index"))
 
+    if ex["status"] == "stopped":
+        flash("已结束考试为只读，不能重新开考", "err")
+        return redirect(url_for("index"))
     if ex["status"] in ("running", "paused"):
         flash(f"「{ex['title']}」已经在进行中了。"
               f"想重来请先点「结束考试」再重新开始。", "err")
@@ -3454,6 +3720,7 @@ def exam_stop(eid):
         return redirect(url_for("index"))
     clear_login = request.form.get("clear_login") == "1"
     n_online = db.stats(eid)["online"]
+    db.snapshot_exam_students(eid)
     db.set_exam_status(eid, "stopped")
     db.set_phase(eid, "ended")
     # 新客户端：交卷 → 提示 → 关闭客户端（按选择决定是否清登录信息）
@@ -3568,6 +3835,8 @@ def practice_use(pid):
         if not ex:
             flash("考试不存在", "err")
             return redirect(url_for("practice_bank"))
+        if _paper_locked(ex):
+            return redirect(url_for("practice_bank", to=to_eid))
         had_type = "practice" in _selected_types(ex)
         # 类型联动：只让装这场考试勾了的操作题类型；
         # 一个类型都没勾 → 装的时候自动把该题类型勾上（顺手帮老师配好）
@@ -3604,10 +3873,12 @@ def exam_del_task(eid, pid):
         flash("考试不存在", "err")
         return redirect(url_for("index"))
     if _paper_locked(ex):
-        return redirect(url_for("exam_edit", eid=eid, tab="basic"))
+        target_tab = "overview" if request.form.get("tab") == "overview" else "basic"
+        return redirect(url_for("exam_edit", eid=eid, tab=target_tab))
     db.remove_task_from_exam(eid, pid)
     flash("已移除这道操作题")
-    return redirect(url_for("exam_edit", eid=eid, tab="practice"))
+    target_tab = "overview" if request.form.get("tab") == "overview" else "practice"
+    return redirect(url_for("exam_edit", eid=eid, tab=target_tab))
 
 
 @app.route("/practice/<int:pid>/del", methods=["POST"])
@@ -3779,7 +4050,10 @@ def _parse_question_form():
                             f" 超出拖拽项范围（只有 "
                             f"{'、'.join(sorted(allowed))}）")
             answer = "|".join(pairs)
-        drag_slots_json = json.dumps({"slots": slots}, ensure_ascii=False)
+        layout = (request.form.get("drag_layout") or "grid").strip().lower()
+        if layout not in ("grid", "horizontal"):
+            layout = "grid"
+        drag_slots_json = json.dumps({"slots": slots, "layout": layout}, ensure_ascii=False)
 
     data = {
         "qtype": qtype,
@@ -4177,6 +4451,12 @@ def scores_regrade(eid):
     """重新评分：丢后台队列，50 份也不用干等（等完页面早超时了）"""
     try:
         ex = db.get_exam(eid)
+        if not ex:
+            flash("考试不存在", "err")
+            return redirect(url_for("index"))
+        if ex["status"] == "stopped":
+            flash("已结束考试只能查看和导出", "err")
+            return redirect(url_for("scores", eid=eid))
         n = 0
         for s in db.list_submissions(eid):
             if s["saved_path"] and os.path.isfile(s["saved_path"]):
@@ -4201,6 +4481,13 @@ def scores_rejudge_code(eid):
       · 判分时服务器缺环境（如没装 g++），后来补上了
     """
     try:
+        ex = db.get_exam(eid)
+        if not ex:
+            flash("考试不存在", "err")
+            return redirect(url_for("index"))
+        if ex["status"] == "stopped":
+            flash("已结束考试只能查看和导出", "err")
+            return redirect(url_for("scores", eid=eid))
         n, ok = db.rejudge_code_answers(eid)
         flash(f"已重新判分 {n} 条程序填空答案，其中 {ok} 条判对" if n
               else "本场没有程序填空题，无需重判")
@@ -4249,8 +4536,8 @@ def exam_autorule(eid):
     if not ex:
         flash("考试不存在")
         return redirect(url_for("index"))
-    if ex["status"] in ("running", "paused"):
-        flash("考试进行中，不能修改评分规则", "err")
+    if ex["status"] in ("running", "paused", "stopped"):
+        flash("考试进行中或已结束，不能修改评分规则", "err")
         return redirect(url_for("index"))
     f = request.files.get("answer")
     if not f or not f.filename:
@@ -4928,6 +5215,8 @@ def exam_roster_save(eid):
     ex = db.get_exam(eid)
     if not ex:
         return {"ok": False, "msg": "考试不存在"}, 404
+    if ex["status"] == "stopped":
+        return {"ok": False, "msg": "已结束考试为只读，名单已锁定"}, 400
     data = request.get_json(silent=True) or {}
     rows = _parse_roster_text(data.get("text", ""))
     if (data.get("mode") or "replace") == "append":
@@ -4941,8 +5230,11 @@ def exam_roster_save(eid):
 
 @app.route("/exam/<int:eid>/roster/clear", methods=["POST"])
 def exam_roster_clear(eid):
-    if not db.get_exam(eid):
+    ex = db.get_exam(eid)
+    if not ex:
         return {"ok": False, "msg": "考试不存在"}, 404
+    if ex["status"] == "stopped":
+        return {"ok": False, "msg": "已结束考试为只读，名单已锁定"}, 400
     db.clear_roster(eid)
     db.invalidate()
     return {"ok": True, "count": 0}
@@ -4950,8 +5242,11 @@ def exam_roster_clear(eid):
 
 @app.route("/exam/<int:eid>/roster/<int:rid>/delete", methods=["POST"])
 def exam_roster_del(eid, rid):
-    if not db.get_exam(eid):
+    ex = db.get_exam(eid)
+    if not ex:
         return {"ok": False, "msg": "考试不存在"}, 404
+    if ex["status"] == "stopped":
+        return {"ok": False, "msg": "已结束考试为只读，名单已锁定"}, 400
     db.del_roster(eid, rid)
     db.invalidate()
     return {"ok": True, "count": len(db.roster_of(eid))}
@@ -4987,6 +5282,9 @@ def exam_delete(eid):
         flash(f"「{ex['title']}」正在进行中（或已暂停），"
               f"请先「结束考试」再删除", "err")
         return redirect(url_for("index"))
+    if ex["status"] == "stopped":
+        flash("已结束考试为只读，不能删除；可查看成绩、评讲或导出", "err")
+        return redirect(url_for("index"))
     sub_n = len(db.list_submissions(eid))
     db.delete_exam(eid)
     flash(f"已删除考试「{ex['title']}」" + (f"及其 {sub_n} 份答卷" if sub_n else ""))
@@ -4997,6 +5295,10 @@ def exam_delete(eid):
 
 @app.route("/scores/<int:eid>/submission/<int:sid>/delete", methods=["POST"])
 def submission_delete(eid, sid):
+    ex = db.get_exam(eid)
+    if ex and ex["status"] == "stopped":
+        flash("已结束考试只能查看和导出，不能删除提交记录", "err")
+        return redirect(url_for("scores", eid=eid))
     db.delete_submission(sid)
     flash("已删除该提交记录")
     return redirect(url_for("scores", eid=eid))
@@ -5155,7 +5457,7 @@ def exam_addall(eid):
     tab = request.form.get("tab", qtype)
     if qtype in THEORY_TYPES:
         if request.form.get("selection_present") == "1":
-            qids, error = _clean_type_question_ids(qtype, request.form.getlist("qids"))
+            qids, error = _submitted_type_question_ids(qtype)
             if error:
                 flash(error, "err")
                 return redirect(url_for("exam_edit", eid=eid, tab=tab))

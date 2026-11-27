@@ -260,13 +260,14 @@ def make_button(parent, text, command, accent=False, width=None):
     return ttk.Button(parent, **kwargs)
 
 
-def make_tree(parent, columns, headings, widths, stretch=None, height=10):
+def make_tree(parent, columns, headings, widths, stretch=None, height=10,
+              selectmode="browse"):
     """创建带双向滚动条的树；返回 (容器, Treeview)。"""
     holder = ttk.Frame(parent)
     holder.grid_rowconfigure(0, weight=1)
     holder.columnconfigure(0, weight=1)
     tree = ttk.Treeview(holder, columns=columns, show="headings",
-                        selectmode="browse", height=height, style="Data.Treeview")
+                        selectmode=selectmode, height=height, style="Data.Treeview")
     ui_theme.style_tree_tags(tree)
     vertical = ttk.Scrollbar(holder, orient="vertical", command=tree.yview)
     horizontal = ttk.Scrollbar(holder, orient="horizontal", command=tree.xview)
@@ -279,6 +280,15 @@ def make_tree(parent, columns, headings, widths, stretch=None, height=10):
         tree.heading(column, text=title)
         tree.column(column, width=widths[index], minwidth=35,
                     anchor="w", stretch=(column == stretch))
+
+    def fit_heading(event):
+        if tree.identify_row(event.y):
+            return
+        column = tree.identify_column(event.x)
+        if column:
+            ui_theme.autofit_tree_column(tree, column)
+
+    tree.bind("<Double-Button-1>", fit_heading, add="+")
     return holder, tree
 
 
@@ -301,6 +311,7 @@ class TeacherApp:
         self._pending = 0
         self._closed = False
         self._starting = False
+        self._session_job = None
         self._control_states = {}
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
@@ -402,6 +413,10 @@ class TeacherApp:
                         error(failure)
                     else:
                         mb.showerror("操作失败", str(failure), parent=self.root)
+                elif (isinstance(result, dict) and result.get("status") == 401
+                      and self._current_login() is None):
+                    self.api.discard_session()
+                    self._build_login("登录状态已失效，请重新登录。")
                 elif success:
                     success(result)
                 elif status is not None:
@@ -499,15 +514,10 @@ class TeacherApp:
                 return
             if result.get("ok"):
                 login.btn.configure(state="normal")
-                login.local_btn.configure(state="normal")
-                login.passwordless_enabled = bool(result.get("passwordless_local"))
-                if result.get("passwordless_local"):
-                    login.local_btn.configure(text="本机免密码登录")
-                    login.tip.configure(text="本机服务已就绪，可使用免密码登录。",
-                                        foreground=GREEN)
+                if login.login_notice:
+                    login.tip.configure(text=login.login_notice, foreground=ORANGE)
                 else:
-                    login.local_btn.configure(text="启用本机免密码登录")
-                    login.tip.configure(text="本机服务已就绪，请输入密码或启用本机免密码。",
+                    login.tip.configure(text="本机服务已就绪，请输入管理密码（登录有效 24 小时）。",
                                         foreground=GREEN)
             else:
                 login.tip.configure(text=result.get("msg", "服务启动失败"),
@@ -529,15 +539,43 @@ class TeacherApp:
     def _current_login(self):
         return getattr(self, "login_window", None)
 
-    def _build_login(self):
+    def _build_login(self, notice=""):
+        if self._session_job is not None:
+            try:
+                self.root.after_cancel(self._session_job)
+            except Exception:
+                pass
+            self._session_job = None
+        self.main_window = None
         self._starting = False
         self.login_window = LoginWindow(self)
+        self.login_window.login_notice = notice
+        if notice:
+            self.login_window.tip.configure(text=notice, foreground=ORANGE)
         ui_theme.apply_to_tk(self.root, self.ui_tokens)
         self.startup(self.login_window)
 
-    def enter_main(self):
+    def enter_main(self, expires_in=24 * 3600):
+        self.login_window = None
+        if self._session_job is not None:
+            try:
+                self.root.after_cancel(self._session_job)
+            except Exception:
+                pass
+        try:
+            seconds = max(1, int(expires_in or 24 * 3600))
+        except (TypeError, ValueError):
+            seconds = 24 * 3600
+        self._session_job = self.root.after(seconds * 1000, self._session_timeout)
         self.main_window = MainWindow(self)
         ui_theme.apply_to_tk(self.root, self.ui_tokens)
+
+    def _session_timeout(self):
+        self._session_job = None
+        if self._closed or self._current_login() is not None:
+            return
+        self.api.discard_session()
+        self._build_login("登录已满 24 小时，请重新登录。")
 
     def logout(self):
         self.api.clear_session()
@@ -549,6 +587,12 @@ class TeacherApp:
                                parent=self.root):
                 return
         self._closed = True
+        if self._session_job is not None:
+            try:
+                self.root.after_cancel(self._session_job)
+            except Exception:
+                pass
+            self._session_job = None
         try:
             self.root.destroy()
         except Exception:
@@ -599,18 +643,13 @@ class LoginWindow:
         self.tip = tk.Label(card, text="正在检查本机服务…", bg=CARD, fg=GRAY,
                             font=(FONT, 9), wraplength=340, justify="left")
         self.checked_base = None
-        self.passwordless_enabled = False
+        self.login_notice = ""
         self.tip.pack(pady=(0, 8))
         self.btn = tk.Button(card, text="连 接 并 登 录", command=self._connect,
                              bg=BLUE, fg="white", font=(FONT, 11, "bold"),
                              relief="flat", cursor="hand2",
                              activebackground=BLUE_D, pady=10, state="disabled")
         self.btn.pack(fill="x")
-        self.local_btn = tk.Button(
-            card, text="本机免密码登录", command=self._local_login,
-            bg=CARD, fg=BLUE, font=(FONT, 10), relief="flat",
-            cursor="hand2", activebackground=CARD, state="disabled")
-        self.local_btn.pack(pady=(10, 0))
 
         bar = tk.Frame(card, bg=CARD)
         bar.pack(pady=(10, 0))
@@ -656,7 +695,7 @@ class LoginWindow:
             if self.app._current_login() is not self:
                 return
             if result.get("ok"):
-                self.app.enter_main()
+                self.app.enter_main(result.get("expires_in", 24 * 3600))
             else:
                 self.tip.configure(
                     text=f"连接或登录失败：{result.get('msg', '未知错误')}",
@@ -669,50 +708,6 @@ class LoginWindow:
             controls=(self.btn,), status=self.tip,
             busy_text="正在连接服务器并登录…")
 
-    def _local_login(self):
-        if self.app.busy:
-            return
-        base = norm_base(self.e_server.get())
-        if not base:
-            self.tip.configure(text="请填写服务器地址", foreground=RED)
-            return
-        self.api.base = base
-        save_server(self.e_server.get().strip())
-        enable = not self.passwordless_enabled
-        if enable and not mb.askyesno(
-                "启用本机免密码",
-                "启用后，这台电脑打开老师端将无需管理密码。\n"
-                "远程电脑仍需要密码。确定启用吗？",
-                parent=self.root):
-            return
-
-        def work():
-            result = self.app._ensure_server_sync(base)
-            if not result.get("ok"):
-                return result
-            if enable or not result.get("passwordless_local"):
-                result = self.api.set_passwordless(True)
-                if not result.get("ok"):
-                    return result
-            return self.api.login("")
-
-        def success(result):
-            if self.app._current_login() is not self:
-                return
-            if result.get("ok"):
-                self.passwordless_enabled = True
-                self.app.enter_main()
-            else:
-                self.tip.configure(
-                    text=f"免密码登录失败：{result.get('msg', '未知错误')}",
-                    foreground=RED)
-
-        self.app.task(
-            work, success,
-            error=lambda exc: self.tip.configure(
-                text=f"免密码登录失败：{exc}", foreground=RED),
-            controls=(self.btn, self.local_btn), status=self.tip,
-            busy_text="正在启用并登录…")
 
 
 class MainWindow:
@@ -920,7 +915,8 @@ class ExamManager(PageBase):
         self.exams = []
         self._build()
         self.tree.bind("<<TreeviewSelect>>", lambda event: self._update_buttons())
-        self.tree.bind("<Double-1>", lambda event: self._edit())
+        self.tree.bind("<Double-1>", lambda event: self._double_click(event))
+        self.tree.bind("<Button-3>", lambda event: self._context_menu(event))
 
     def _build(self):
         info = ttk.Frame(self)
@@ -953,6 +949,9 @@ class ExamManager(PageBase):
         self.btn_export = self.add_action(make_button(
             row1, "导出", lambda: self._export()))
         self.btn_export.pack(side="right", padx=4)
+        self.btn_batch_export = self.add_action(make_button(
+            row1, "批量导出", self._export_batch))
+        self.btn_batch_export.pack(side="right", padx=4)
         self.btn_refresh = self.add_action(make_button(
             row1, "刷新", self.main.refresh_all))
         self.btn_refresh.pack(side="right", padx=4)
@@ -962,8 +961,7 @@ class ExamManager(PageBase):
         row2.grid(row=2, column=0, sticky="ew", pady=(0, 7))
         commands = (
             ("start", "开始考试", self._start), ("pause", "暂停", self._pause),
-            ("resume", "恢复", self._resume), ("theory", "切理论", self._theory),
-            ("practice", "切实操", self._practice), ("stop", "结束考试", self._stop),
+            ("resume", "恢复", self._resume), ("stop", "结束考试", self._stop),
             ("regrade", "重新评分", self._regrade),
             ("rejudge", "重判程序填空", self._rejudge),
         )
@@ -975,7 +973,8 @@ class ExamManager(PageBase):
         holder, self.tree = make_tree(
             self, ("id", "code", "title", "klass", "duration", "status", "phase"),
             ("ID", "考试编号", "考试名称", "班级", "时长", "状态", "阶段"),
-            (42, 148, 245, 90, 78, 72, 76), stretch="title", height=12)
+            (42, 148, 245, 90, 78, 72, 76), stretch="title", height=12,
+            selectmode="extended")
         holder.grid(row=3, column=0, sticky="nsew")
 
     def set_data(self, data):
@@ -1023,16 +1022,16 @@ class ExamManager(PageBase):
         states = {
             "new": True, "edit": exam is not None, "scores": exam is not None,
             "review": exam is not None, "charts": exam is not None,
-            "delete": exam is not None and not active,
+            "delete": exam is not None and status == "draft",
             "export": exam is not None, "refresh": True,
-            "start": exam is not None and status not in ("running", "paused"),
+            "start": exam is not None and status == "draft",
             "pause": status == "running", "resume": status == "paused",
-            "theory": active, "practice": active, "stop": active,
-            "regrade": exam is not None, "rejudge": exam is not None,
+            "stop": active, "regrade": exam is not None and status != "stopped",
+            "rejudge": exam is not None and status != "stopped",
         }
         for key, widget in self.buttons.items():
             widget.configure(state="normal" if states[key] else "disabled")
-        self.btn_edit.configure(state="normal" if exam else "disabled")
+        self.btn_edit.configure(state="normal" if status == "draft" else "disabled")
         self.btn_scores.configure(state="normal" if exam else "disabled")
         self.btn_review.configure(state="normal" if exam else "disabled")
         self.btn_charts.configure(state="normal" if exam else "disabled")
@@ -1049,6 +1048,61 @@ class ExamManager(PageBase):
         if not exam or self.app.busy:
             return
         ExamEditor(self, exam["id"])
+
+    def _double_click(self, event):
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        self.tree.selection_set(row)
+        exam = self._selected()
+        if not exam or self.app.busy:
+            return
+        status = exam.get("status")
+        if status == "running":
+            self._pause()
+        elif status == "paused":
+            self._resume()
+        elif status == "stopped":
+            self._scores()
+        else:
+            self._edit()
+
+    def _context_menu(self, event):
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        self.tree.selection_set(row)
+        exam = self._selected()
+        if not exam:
+            return
+        menu = tk.Menu(self.tree, tearoff=0)
+        menu.add_command(label="编辑配置", command=self._edit,
+                         state="disabled" if exam.get("status") in ("running", "paused", "stopped") else "normal")
+        menu.add_command(label="复制考试", command=self._copy)
+        menu.add_separator()
+        menu.add_command(label="查看成绩", command=self._scores)
+        menu.add_command(label="试卷评讲", command=self._review)
+        menu.add_command(label="成绩图表", command=self._charts)
+        menu.add_command(label="导出", command=self._export)
+        menu.add_separator()
+        menu.add_command(label="删除", command=self._delete,
+                         state="disabled" if exam.get("status") != "draft" else "normal")
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _copy(self):
+        exam = self._require_selected()
+        if not exam or self.app.busy:
+            return
+        eid = exam["id"]
+
+        def success(result):
+            if result.get("ok"):
+                self.main.after_change("已创建考试副本")
+            else:
+                self.main.show_failure(result, "复制考试失败")
+
+        self.main.task(lambda: self.api.copy_exam(eid), success,
+                       controls=self.action_controls(), busy_text="正在复制考试…")
 
     def _delete(self):
         exam = self._require_selected()
@@ -1195,6 +1249,41 @@ class ExamManager(PageBase):
             self.main.export_scores(exam["id"], self.export_var.get(),
                                     exam.get("title") or exam.get("code") or "")
 
+    def _export_batch(self):
+        if self.app.busy:
+            return
+        ids = [int(item) for item in self.tree.selection() if str(item).isdigit()]
+        if not ids:
+            mb.showinfo("批量导出", "请先勾选多场考试，可按住 Ctrl 或 Shift 多选。",
+                        parent=self.main.root)
+            return
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        initial_dir = desktop if os.path.isdir(desktop) else os.getcwd()
+        path = filedialog.asksaveasfilename(
+            parent=self.main.root, title="导出多场考试成绩", initialdir=initial_dir,
+            initialfile="多场考试成绩.xlsx", defaultextension=".xlsx",
+            filetypes=[("Excel 工作簿", "*.xlsx")])
+        if not path:
+            return
+
+        def work():
+            result = self.api.export_exams(ids)
+            if not result.get("ok"):
+                return result
+            with open(path, "wb") as fileobj:
+                fileobj.write(result.get("data") or result.get("content") or b"")
+            return {"ok": True, "path": path}
+
+        def success(result):
+            if result.get("ok"):
+                mb.showinfo("批量导出完成", f"已导出 {len(ids)} 场考试：\n{path}",
+                            parent=self.main.root)
+            else:
+                self.main.show_failure(result, "批量导出失败")
+
+        self.main.task(work, success, controls=self.action_controls(),
+                       busy_text="正在生成多场 Excel…")
+
     def _regrade(self):
         exam = self._require_selected()
         if not exam or self.app.busy:
@@ -1288,7 +1377,9 @@ class StopPrompt:
         ttk.Label(frame, text="确定结束当前考试并通知全部学生机退出吗？",
                   wraplength=390).pack(anchor="w")
         ttk.Label(frame, text="请选择是否同时清除学生端的登录状态：",
-                  style="Muted.TLabel").pack(anchor="w", pady=(10, 12))
+                  style="Muted.TLabel").pack(anchor="w", pady=(10, 4))
+        ttk.Label(frame, text="清除只影响学生机下次登录；老师端仍保留本场历史姓名、座位、IP 和成绩。",
+                  style="Muted.TLabel", wraplength=390).pack(anchor="w", pady=(0, 12))
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x")
         make_button(buttons, "取消", self.top.destroy).pack(side="left")
@@ -1320,6 +1411,8 @@ class ExamEditor:
         self.selected_qids = []
         self.selected_pids = []
         self.materials = []
+        self.checked_materials = set()
+        self.checks_data = []
         self.pending_uploads = []
         self._baseline = None
         self._saved_qids = []
@@ -1372,7 +1465,7 @@ class ExamEditor:
             tuple(sorted(self.type_vars)), tuple(self.type_vars[k].get()
                                                  for k in sorted(self.type_vars)),
             text(self.requirement_text), text(self.finish_text),
-            self.checks_editor.get_rules(), self.typing_editor.get_config(),
+            self.typing_editor.get_config(),
             self.drawing_editor.get_config(), text(self.roster_text),
             tuple(self.materials), tuple(self.pending_uploads),
         )
@@ -1430,11 +1523,11 @@ class ExamEditor:
             bordercolor=LINE, lightcolor=LINE, darkcolor=LINE)
         notebook_style.map(
             "Exam.TNotebook.Tab",
-            background=[("selected", _UI["mint"]), ("active", _UI["yellow"]),
+            background=[("selected", _UI["lavender"]), ("active", _UI["sky"]),
                         ("disabled", BG)],
             foreground=[("selected", INK), ("active", INK),
                         ("disabled", _UI["disabled_fg"])],
-            bordercolor=[("selected", GREEN), ("active", LINE)])
+            bordercolor=[("selected", _UI["purple"]), ("active", LINE)])
         self.notebook = ttk.Notebook(outer, style="Exam.TNotebook")
         self.notebook.enable_traversal()
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -1445,7 +1538,7 @@ class ExamEditor:
         self._build_typing(ttk.Frame(self.notebook, padding=10))
         self._build_drawing(ttk.Frame(self.notebook, padding=10))
         self._build_roster(ttk.Frame(self.notebook, padding=8))
-        self._build_json(ttk.Frame(self.notebook, padding=10))
+        self._build_overview(ttk.Frame(self.notebook, padding=10))
         for widget in (self.requirement_text, self.finish_text, self.roster_text):
             widget.bind("<KeyRelease>", lambda event: self._note_dirty())
             ui_theme.bind_mousewheel(widget, widget)
@@ -1536,10 +1629,11 @@ class ExamEditor:
             self.notebook.add(frame, text=label)
             self._selection_frames.add(str(frame))
             frame.rowconfigure(2, weight=1)
-            frame.columnconfigure(0, weight=1)
+            frame.columnconfigure(0, weight=3)
+            frame.columnconfigure(1, weight=2)
 
             bar = ttk.Frame(frame)
-            bar.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+            bar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
             filter_var = tk.StringVar()
             self._control(ttk.Entry(bar, textvariable=filter_var, width=18)).pack(
                 side="left")
@@ -1566,7 +1660,7 @@ class ExamEditor:
                              side="left", padx=(6, 0))
 
             tools = ttk.Frame(frame)
-            tools.grid(row=1, column=0, sticky="ew", pady=(0, 4))
+            tools.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 4))
             self._button(tools, "全选当前",
                          lambda k=key: self._select_visible(k, True)).pack(
                              side="left")
@@ -1582,30 +1676,39 @@ class ExamEditor:
             self._button(tools, "下移",
                          lambda k=key: self._move_selected_question(k, 1)).pack(
                              side="left", padx=4)
+            self._button(tools, "移除所选",
+                         lambda k=key: self._remove_selected_question(k)).pack(
+                             side="left", padx=4)
             count = ttk.Label(tools, text="", style="Muted.TLabel")
             count.pack(side="right", padx=(0, 10))
 
-            holder, tree = make_tree(
-                frame, ("sel", "order", "id", "category", "score", "stem"),
-                ("选择", "顺序", "ID", "分类", "分值", "题干"),
-                (42, 44, 42, 100, 48, 390), stretch="stem", height=12)
-            holder.grid(row=2, column=0, sticky="nsew")
+            left, tree = make_tree(
+                frame, ("sel", "id", "category", "score", "stem"),
+                ("选择", "ID", "分类", "分值", "全部题库"),
+                (46, 44, 92, 50, 360), stretch="stem", height=12)
+            left.grid(row=2, column=0, sticky="nsew", padx=(0, 6))
+            right, selected_tree = make_tree(
+                frame, ("order", "score", "stem"),
+                ("顺序", "分值", "已选题目"),
+                (48, 52, 250), stretch="stem", height=12)
+            right.grid(row=2, column=1, sticky="nsew")
             tree.bind("<Button-1>", lambda event, k=key: self._toggle_question(event, k))
             tree.bind("<Double-1>", lambda event, k=key: self._toggle_question(event, k))
             tree.bind("<space>", lambda event, k=key: self._toggle_question_keyboard(event, k))
+            selected_tree.bind("<Double-1>", lambda event, k=key: self._remove_selected_question(k))
             filter_var.trace_add("write", lambda *args, k=key: self._render_question_page(k))
             cat_var.trace_add("write", lambda *args, k=key: self._render_question_page(k))
             sort_var.trace_add("write", lambda *args, k=key: self._render_question_page(k))
             self.q_pages[key] = {
                 "frame": frame, "filter": filter_var, "category": cat_var,
                 "category_combo": cat_combo, "sort": sort_var, "random": random_var,
-                "tree": tree, "count": count,
+                "tree": tree, "selected_tree": selected_tree, "count": count,
             }
 
     def _build_practice(self, frame):
         self.practice_frame = frame
         self.notebook.add(frame, text="实操题")
-        self._selection_frames.add(frame)
+        self._selection_frames.add(str(frame))
         frame.rowconfigure(2, weight=1)
         frame.columnconfigure(0, weight=1)
         bar = ttk.Frame(frame)
@@ -1662,7 +1765,10 @@ class ExamEditor:
         frame.rowconfigure(1, weight=1)
         ttk.Label(frame, text="打字练习配置", font=(FONT, 11, "bold")).grid(
             row=0, column=0, sticky="w", pady=(0, 6))
-        self.typing_editor = TypingConfigEditor(frame, on_change=self._note_dirty)
+        self.typing_editor = TypingConfigEditor(
+            frame, on_change=self._note_dirty,
+            passages=self.main.data.get("typing_passages") or [],
+            passages_en=self.main.data.get("typing_passages_en") or [])
         self.typing_editor.grid(row=1, column=0, sticky="nsew")
         self.controls.extend(self.typing_editor.controls)
 
@@ -1709,12 +1815,13 @@ class ExamEditor:
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         right.rowconfigure(1, weight=1)
         right.columnconfigure(0, weight=1)
-        ttk.Label(right, text="当前考试素材（上传后保存到服务端）").grid(
+        ttk.Label(right, text="额外通用素材（实操题素材随题目自动下发）").grid(
             row=0, column=0, sticky="w")
         holder, self.material_tree = make_tree(
-            right, ("name", "state"), ("文件名", "状态"), (270, 75),
-            stretch="name", height=5)
+            right, ("sel", "name", "state"), ("选择", "文件名", "状态"),
+            (48, 250, 75), stretch="name", height=5)
         holder.grid(row=1, column=0, sticky="nsew", pady=4)
+        self.material_tree.bind("<Button-1>", self._toggle_material_check)
         buttons = ttk.Frame(right)
         buttons.grid(row=2, column=0, sticky="ew")
         self._button(buttons, "上传素材", self._upload).pack(side="left")
@@ -1728,33 +1835,107 @@ class ExamEditor:
         self._button(right, "加入所选素材", self._add_available).grid(
             row=5, column=0, sticky="w")
 
-    def _build_json(self, frame):
-        self.notebook.add(frame, text="评分规则")
+    def _build_overview(self, frame):
+        self.overview_frame = frame
+        self.notebook.add(frame, text="总览")
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(1, weight=1)
-        ttk.Label(frame, text="实操评分规则", font=(FONT, 11, "bold")).grid(
-            row=0, column=0, sticky="w")
-        self.checks_editor = RuleEditor(frame, on_change=self._note_dirty)
-        self.checks_editor.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        frame.rowconfigure(2, weight=1)
+        summary = ttk.Frame(frame)
+        summary.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self.overview_total = ttk.Label(summary, text="总分 0", style="Plaque.TLabel")
+        self.overview_total.pack(side="left")
+        self.overview_detail = ttk.Label(summary, text="", style="Muted.TLabel")
+        self.overview_detail.pack(side="left", padx=12)
+        holder, self.overview_tree = make_tree(
+            frame, ("kind", "score", "name"), ("题型", "分值", "试题明细"),
+            (90, 70, 620), stretch="name", height=14)
+        holder.grid(row=2, column=0, sticky="nsew")
+        bar = ttk.Frame(frame)
+        bar.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        self._button(bar, "移除所选试题", self._remove_overview_selected).pack(
+            side="left")
+        ttk.Label(bar, text="移除后记得保存考试；已结束考试仅可查看。",
+                  style="Muted.TLabel").pack(side="left", padx=10)
+
+    def _render_overview(self):
+        if not hasattr(self, "overview_tree"):
+            return
+        self.overview_tree.delete(*self.overview_tree.get_children())
+        questions = {int(question["id"]): question for question in self._questions()}
+        tasks = {int(task["id"]): task for task in self._practices()}
+        total = 0.0
+        theory_count = 0
+        practice_count = 0
+        for qid in self.selected_qids:
+            question = questions.get(qid)
+            if not question:
+                continue
+            score = float(question.get("score") or 0)
+            total += score
+            theory_count += 1
+            self.overview_tree.insert("", "end", iid=f"q:{qid}", values=(
+                QTYPE_NAMES.get(question.get("qtype"), question.get("qtype")),
+                score, question.get("stem") or ""))
+        for pid in self.selected_pids:
+            task = tasks.get(pid)
+            if not task:
+                continue
+            score = sum(float(rule.get("score") or 0)
+                        for rule in task.get("checks") or [])
+            total += score
+            practice_count += 1
+            self.overview_tree.insert("", "end", iid=f"p:{pid}", values=(
+                "实操题", score, task.get("name") or ""))
+        self.overview_total.configure(text=f"总分 {total:g}")
+        self.overview_detail.configure(
+            text=f"理论 {theory_count} 道 · 实操 {practice_count} 道 · "
+                 f"共 {theory_count + practice_count} 道")
+
+    def _remove_overview_selected(self):
+        if self.locked:
+            return
+        selected = self.overview_tree.selection()
+        if not selected:
+            mb.showinfo("移除试题", "请先在总览中选择一道题。", parent=self.top)
+            return
+        row = selected[0]
+        kind, raw_id = row.split(":", 1)
+        item_id = int(raw_id)
+        if kind == "q" and item_id in self.selected_qids:
+            self.selected_qids.remove(item_id)
+            self._render_all_questions()
+        elif kind == "p" and item_id in self.selected_pids:
+            self.selected_pids.remove(item_id)
+            self._render_practice()
+        self._render_overview()
+        self._note_dirty()
 
     def _on_type_changed(self):
         if hasattr(self, "q_pages"):
             self._sync_type_tabs()
 
     def _sync_type_tabs(self):
+        questions = {int(question["id"]): question for question in self._questions()}
+        counts = {key: 0 for key, _label in QTYPES}
+        for qid in self.selected_qids:
+            question = questions.get(qid)
+            if question and question.get("qtype") in counts:
+                counts[question["qtype"]] += 1
         for key, label in QTYPES:
             page = self.q_pages.get(key)
             if page:
                 enabled = bool(self.type_vars[key].get())
+                suffix = f" ({counts[key]})" if counts[key] else ""
                 self.notebook.tab(page["frame"],
-                                  text=("✓ " if enabled else "") + label)
+                                  text=("✓ " if enabled else "") + label + suffix)
         for key, frame, label in (
                 ("practice", getattr(self, "practice_frame", None), "实操题"),
                 ("typing", getattr(self, "typing_frame", None), "打字练习"),
                 ("drawing", getattr(self, "drawing_frame", None), "画板题")):
             if frame is not None:
                 enabled = bool(self.type_vars[key].get())
-                self.notebook.tab(frame, text=("✓ " if enabled else "") + label)
+                suffix = f" ({len(self.selected_pids)})" if key == "practice" and self.selected_pids else ""
+                self.notebook.tab(frame, text=("✓ " if enabled else "") + label + suffix)
 
     def _on_tab_changed(self, event=None):
         if self._tab_guard or not hasattr(self, "notebook"):
@@ -1813,7 +1994,7 @@ class ExamEditor:
         for key in ("single", "multi", "judge", "blank", "code", "drag",
                     "practice"):
             self.type_vars[key].set(True)
-        self.checks_editor.set_rules([])
+        self.checks_data = []
         self.typing_editor.set_config({})
         self.drawing_editor.set_config(
             {"brief": "", "styles": ["draw"], "grid": 28})
@@ -1870,22 +2051,23 @@ class ExamEditor:
         self.selected_pids = [int(pid) for pid in result.get("practice_ids") or []]
         self.roster_text.insert("1.0", result.get("roster") or "")
         self.materials = [str(name) for name in as_list(exam.get("materials"))]
-        self.checks_editor.set_rules(as_list(exam.get("checks")))
+        self.checks_data = as_list(exam.get("checks"))
         self.typing_editor.set_config(result.get("typing_config") or {})
         self.drawing_editor.set_config(result.get("drawing_config") or {})
-        self.controls.extend(self.checks_editor.controls)
         self._render_all_questions()
         self._render_practice()
         self._render_materials()
+        self._render_overview()
         self._update_roster_count()
         self._sync_type_tabs()
         self._sync_practice_types()
-        self.locked = exam.get("status") in ("running", "paused")
+        self.locked = exam.get("status") in ("running", "paused", "stopped")
         if self.locked:
             for widget in self.controls:
                 if widget is not self.btn_cancel:
                     set_widget_state(widget, "disabled")
-            self.tip.configure(text="考试进行中，配置已锁定", foreground=ORANGE)
+            self.tip.configure(text="考试已结束，成绩与配置已锁定，仅可查看和导出。",
+                               foreground=ORANGE)
             self.footer_tip.configure(text="请先结束考试再修改配置")
         else:
             self.tip.configure(text="配置已加载", foreground=GREEN)
@@ -1956,15 +2138,29 @@ class ExamEditor:
             chosen = qid in selected_pos
             tags = ("selected",) if chosen else (("odd",) if index % 2 else ())
             tree.insert("", "end", iid=str(qid), values=(
-                "✓" if chosen else "○",
-                selected_pos[qid] + 1 if chosen else "—", qid,
+                "✓" if chosen else "○", qid,
                 question.get("category") or "未分类",
                 question.get("score") or 0, question.get("stem") or ""), tags=tags)
+        selected_tree = page["selected_tree"]
+        selected_tree.delete(*selected_tree.get_children())
+        by_id = {int(question["id"]): question for question in questions}
+        type_order = 0
+        for qid in self.selected_qids:
+            question = by_id.get(qid)
+            if not question:
+                continue
+            type_order += 1
+            selected_tree.insert("", "end", iid=str(qid), values=(
+                type_order, question.get("score") or 0,
+                question.get("stem") or ""),
+                tags=("selected",) if type_order % 2 else ())
         question_ids = {int(question["id"]) for question in questions}
         type_selected = sum(1 for qid in self.selected_qids if qid in question_ids)
         page["count"].configure(
-            text=f"显示 {len(rows)} 道 · 本题型已选 {type_selected} 道 · "
+            text=f"全部题库 {len(rows)} 道 · 已选 {type_selected} 道 · "
                  f"全卷已选 {len(self.selected_qids)} 道")
+        self._sync_type_tabs()
+        self._render_overview()
 
     def _toggle_question(self, event, key):
         row = self.q_pages[key]["tree"].identify_row(event.y)
@@ -2063,14 +2259,11 @@ class ExamEditor:
         if self.locked:
             return
         page = self.q_pages[key]
-        selected = page["tree"].selection()
+        selected = page["selected_tree"].selection()
         if not selected:
-            mb.showinfo("调整顺序", "请先选择一道已选题目。", parent=self.top)
+            mb.showinfo("调整顺序", "请先在右侧「已选题目」中选择一道题。", parent=self.top)
             return
         qid = int(selected[0])
-        if qid not in self.selected_qids:
-            mb.showinfo("调整顺序", "请先勾选要调整顺序的题目。", parent=self.top)
-            return
         questions = {int(question["id"]): question
                      for question in self._questions_of_type(key)}
         same_type = [item for item in self.selected_qids if item in questions]
@@ -2085,7 +2278,21 @@ class ExamEditor:
             self.selected_qids[pos] = item
         page["sort"].set("选题顺序")
         self._render_question_page(key)
-        page["tree"].selection_set(str(qid))
+        page["selected_tree"].selection_set(str(qid))
+        self._note_dirty()
+
+    def _remove_selected_question(self, key):
+        if self.locked:
+            return
+        page = self.q_pages[key]
+        selected = page["selected_tree"].selection()
+        if not selected:
+            mb.showinfo("移除题目", "请先在右侧「已选题目」中选择要移除的题。", parent=self.top)
+            return
+        qid = int(selected[0])
+        if qid in self.selected_qids:
+            self.selected_qids.remove(qid)
+        self._render_question_page(key)
         self._note_dirty()
 
     @staticmethod
@@ -2136,6 +2343,8 @@ class ExamEditor:
         self.p_count.configure(
             text=f"显示 {len(rows)} 道 · 已选 {len(self.selected_pids)} 道 · "
                  "上移 / 下移可调整学生端作答顺序")
+        self._sync_type_tabs()
+        self._render_overview()
 
     def _toggle_practice(self, event):
         row = self.p_tree.identify_row(event.y)
@@ -2308,18 +2517,45 @@ class ExamEditor:
         self._update_roster_count()
         self._save_roster("replace")
 
+    def _task_material_names(self):
+        tasks = {int(task["id"]): task for task in self._practices()}
+        names = set()
+        for pid in self.selected_pids:
+            for name in (tasks.get(pid) or {}).get("materials") or []:
+                names.add(str(name))
+        return names
+
     def _render_materials(self):
         self.material_tree.delete(*self.material_tree.get_children())
+        task_materials = self._task_material_names()
         for name in self.materials:
+            if name in task_materials:
+                continue
             self.material_tree.insert("", "end", iid="server:" + name,
-                                      values=(name, "已上传"))
+                                      values=("☑" if name in self.checked_materials else "☐",
+                                              name, "已上传"))
         for path in self.pending_uploads:
             name = os.path.basename(path)
             self.material_tree.insert("", "end", iid="pending:" + name,
-                                      values=(name, "待上传"))
+                                      values=("☑" if name in self.checked_materials else "☐",
+                                              name, "待上传"))
         self.available_tree.delete(*self.available_tree.get_children())
         for name in sorted(self.main.data.get("materials") or []):
+            if name in task_materials:
+                continue
             self.available_tree.insert("", "end", iid=str(name), values=(name,))
+
+    def _toggle_material_check(self, event):
+        row = self.material_tree.identify_row(event.y)
+        if not row:
+            return
+        name = row.split(":", 1)[-1]
+        if name in self.checked_materials:
+            self.checked_materials.remove(name)
+        else:
+            self.checked_materials.add(name)
+        self._render_materials()
+        self.material_tree.selection_set(row)
 
     def _upload(self):
         if self.locked:
@@ -2356,26 +2592,37 @@ class ExamEditor:
     def _delete_material(self):
         if self.locked:
             return
-        selected = self.material_tree.selection()
-        if not selected:
-            mb.showinfo("提示", "请先选择要删除的素材。", parent=self.top)
+        names = [name for name in self.checked_materials
+                 if name in self.materials or any(os.path.basename(path) == name
+                                                  for path in self.pending_uploads)]
+        if not names:
+            selected = self.material_tree.selection()
+            if selected:
+                names = [selected[0].split(":", 1)[-1]]
+        if not names:
+            mb.showinfo("提示", "请先勾选要删除的素材。", parent=self.top)
             return
-        row = selected[0]
-        if row.startswith("pending:"):
-            name = row[len("pending:"):]
-            self.pending_uploads = [path for path in self.pending_uploads
-                                    if os.path.basename(path) != name]
-            self._render_materials()
+        if not mb.askyesno("删除素材", "确定从当前考试移除所选素材吗？", parent=self.top):
             return
-        name = row[len("server:"):]
-        if not mb.askyesno("删除素材", f"从当前考试移除「{name}」吗？",
-                           parent=self.top):
-            return
+        pending_names = {os.path.basename(path) for path in self.pending_uploads}
+        self.pending_uploads = [path for path in self.pending_uploads
+                                if os.path.basename(path) not in names]
+        self.checked_materials.difference_update(names)
         if self.eid is None:
-            self.materials = [item for item in self.materials if item != name]
+            self.materials = [item for item in self.materials if item not in names]
             self._render_materials()
             return
         eid = self.eid
+        server_names = [name for name in names if name not in pending_names]
+
+        def work():
+            materials = list(self.materials)
+            for name in server_names:
+                result = self.api.delete_material(eid, name)
+                if not result.get("ok"):
+                    return result
+                materials = list(result.get("materials") or materials)
+            return {"ok": True, "materials": materials}
 
         def success(result):
             if result.get("ok"):
@@ -2385,8 +2632,8 @@ class ExamEditor:
             else:
                 self.main.show_failure(result, "删除素材失败")
 
-        self.main.task(lambda: self.api.delete_material(eid, name), success,
-                       controls=self.controls, busy_text="正在删除素材…")
+        self.main.task(work, success, controls=self.controls,
+                       busy_text="正在删除素材…")
 
     def _add_available(self):
         if self.locked:
@@ -2407,7 +2654,7 @@ class ExamEditor:
         if not title:
             raise ValueError("考试名称不能为空")
         duration = positive_int(self.duration_var.get(), "总时长")
-        checks = self.checks_editor.get_rules()
+        checks = self.checks_data
         typing = self.typing_editor.get_config()
         drawing = self.drawing_editor.get_config()
         question_types = [key for key, _label in EXAM_TYPES
@@ -2826,11 +3073,18 @@ class QuestionEditor:
 
         self.drag_frame = ttk.LabelFrame(form, text="拖拽题专用", padding=7)
         self.drag_frame.grid(row=7, column=0, sticky="nsew", pady=4)
-        self.drag_frame.columnconfigure(0, weight=1)
+        self.drag_frame.columnconfigure(1, weight=1)
+        ttk.Label(self.drag_frame, text="布局").grid(row=0, column=0, sticky="w")
+        self.layout_var = tk.StringVar(value="网格布局")
+        self.layout_box = ttk.Combobox(
+            self.drag_frame, textvariable=self.layout_var, state="readonly",
+            values=("网格布局", "横向流程"), width=12)
+        self.layout_box.grid(row=0, column=1, sticky="w", pady=(0, 4))
+        self.controls.append(self.layout_box)
         ttk.Label(self.drag_frame, text="拖拽槽位（每行一个）").grid(
-            row=0, column=0, sticky="w")
+            row=1, column=0, columnspan=2, sticky="w")
         self.slots_text = self._text(self.drag_frame, 4)
-        self.slots_text.grid(row=1, column=0, sticky="nsew")
+        self.slots_text.grid(row=2, column=0, columnspan=2, sticky="nsew")
 
         footer = ttk.Frame(outer)
         footer.grid(row=1, column=0, sticky="ew", pady=(10, 0))
@@ -2902,6 +3156,8 @@ class QuestionEditor:
         payload = json_object(question.get("payload"), {})
         slots = payload.get("slots") or question.get("slots") or []
         self.slots_text.insert("1.0", "\n".join(str(item) for item in slots))
+        self.layout_var.set("横向流程" if payload.get("layout") == "horizontal"
+                            else "网格布局")
 
     def _slots(self):
         text = self.slots_text.get("1.0", "end").strip()
@@ -2949,6 +3205,8 @@ class QuestionEditor:
             "expected_output": self.expected_text.get("1.0", "end").strip()
                                if qtype == "code" else "",
             "slots": self._slots() if qtype == "drag" else [],
+            "layout": ("horizontal" if self.layout_var.get() == "横向流程"
+                       else "grid") if qtype == "drag" else "",
         }
 
     def _save(self):
@@ -3254,6 +3512,7 @@ class StudentManager(PageBase):
         self.auto_var = tk.BooleanVar(value=True)
         self._build()
         self.tree.bind("<Double-1>", lambda event: self._details())
+        self.tree.bind("<Button-3>", lambda event: self._context_menu(event))
         self._schedule_auto_refresh()
 
     def _build(self):
@@ -3280,7 +3539,7 @@ class StudentManager(PageBase):
             ("在线", "机器标识", "姓名", "座位", "IP", "状态",
              "当前进度", "考试ID", "机器凭证", "最后在线"),
             (44, 135, 65, 48, 95, 62, 190, 52, 65, 100),
-            stretch="hostname", height=13)
+            stretch="progress", height=13)
         holder.grid(row=2, column=0, sticky="nsew")
         ttk.Label(self, text="学生机凭证由服务端保存哈希；重置后旧凭证立即失效，"
                   "学生机下次联网会重新登记。", style="Muted.TLabel",
@@ -3343,6 +3602,18 @@ class StudentManager(PageBase):
         hostname = selected[0]
         return next((student for student in self.students
                      if student.get("hostname") == hostname), None)
+
+    def _context_menu(self, event):
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        self.tree.selection_set(row)
+        menu = tk.Menu(self.tree, tearoff=0)
+        menu.add_command(label="查看详情", command=self._details)
+        menu.add_command(label="重置机器凭证", command=self._reset)
+        menu.add_separator()
+        menu.add_command(label="刷新学生机", command=self.main.refresh_all)
+        menu.tk_popup(event.x_root, event.y_root)
 
     def _reset(self):
         student = self._selected()

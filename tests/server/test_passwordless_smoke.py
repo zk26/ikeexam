@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""免密码登录、免密码考试与 IP 名单回归。"""
+"""管理员密码登录、免密码考试与 IP 名单回归。"""
 import json
 import os
 import sys
@@ -38,23 +38,22 @@ def hello(client, host, remote, name="", seat=""):
     return response, response.get_json() or {}
 
 
-print("== 1. 本机管理员免密码 ==")
+print("== 1. 管理员必须使用密码登录 ==")
 local = app_mod.app.test_client()
 remote = app_mod.app.test_client()
-r = remote.post("/admin_api/passwordless", json={"enabled": True},
-                headers={"X-ikeexam-Local": "1"},
-                environ_base={"REMOTE_ADDR": "10.0.0.8"})
-check("远程不能开启本机免密码", r.status_code == 403, r.get_data(as_text=True))
-r = local.post("/admin_api/passwordless", json={"enabled": True})
-check("缺少本机标识不能开启", r.status_code == 403, r.get_data(as_text=True))
-r = local.post("/admin_api/passwordless", json={"enabled": True},
-               headers={"X-ikeexam-Local": "1"})
-check("本机可以开启免密码", r.status_code == 200 and r.get_json().get("ok"))
+r = local.post("/admin_api/setup", json={"password": "Admin@123"})
+check("本机可以设置初始密码", r.status_code == 200 and r.get_json().get("ok"))
 r = local.post("/admin_api/login", json={"password": ""})
-check("本机空密码登录成功", r.status_code == 200 and r.get_json().get("ok"))
+check("空密码不能登录", r.status_code == 401, r.get_json())
 r = remote.post("/admin_api/login", json={"password": ""},
                 environ_base={"REMOTE_ADDR": "10.0.0.8"})
 check("远程空密码登录被拒绝", r.status_code == 401, r.get_json())
+r = local.post("/admin_api/login", json={"password": "Admin@123"})
+check("正确密码登录成功", r.status_code == 200 and r.get_json().get("ok"))
+csrf = (r.get_json() or {}).get("csrf_token", "")
+r = local.post("/admin_api/passwordless", json={"enabled": True},
+               headers={"X-ikeexam-Local": "1", "X-CSRF-Token": csrf})
+check("管理员免密码接口已移除", r.status_code == 404, r.get_data(as_text=True))
 
 print("== 2. IP 名单解析 ==")
 rows = app_mod._roster_rows(
