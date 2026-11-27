@@ -2,9 +2,13 @@
 {% block title %}控制台{% endblock %}
 {% block body %}
 
-<div class="row" style="justify-content:space-between;margin-bottom:16px">
-  <h1 style="margin:0">控制台</h1>
-  <div class="bar" style="margin:0">
+<div class="page-head">
+  <div>
+    <div class="page-kicker">{{ icon('monitor', 14) }} 教学控制台</div>
+    <h1>控制台</h1>
+    <p class="muted">考试、学生机与实时进度，都在这里。</p>
+  </div>
+  <div class="head-actions">
     <a class="btn green" href="/exam/new">{{ icon('plus') }} 新建考试</a>
     <button class="btn ghost" onclick="document.getElementById('impf').click()">
       {{ icon('upload') }} 导入考试包</button>
@@ -18,7 +22,8 @@
 </div>
 
 {% if not exams %}
-<div class="card" style="border-left:4px solid var(--brand);text-align:center;padding:40px">
+<div class="card welcome-card">
+  <div class="page-kicker" style="margin:0 auto 12px">{{ icon('sun', 14) }} 新的考试，新的好心情</div>
   <h1 style="justify-content:center;font-size:22px">欢迎使用ikee考务中心</h1>
   <p style="color:var(--ink-2);font-size:14px;margin:12px 0 24px">还没有考试，按以下步骤开始：</p>
   <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
@@ -29,12 +34,12 @@
 {% endif %}
 
 <!-- 结束考试确认框（老师要求：问一句要不要清学生端登录信息） -->
-<div id="stopMask" onclick="if(event.target===this)closeStop()"
-     style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:120"></div>
-<div id="stopBox" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-     z-index:121;background:#fff;border-radius:var(--r-s);box-shadow:0 12px 48px rgba(0,0,0,.28);
-     width:min(460px,92vw);padding:20px 22px">
-  <h2 style="margin:0 0 8px;font-size:17px">结束考试</h2>
+<div id="stopMask" class="modal-mask" onclick="if(event.target===this)closeStop()"
+     style="display:none;position:fixed;inset:0;z-index:120"></div>
+<div id="stopBox" class="modal-card" role="dialog" aria-modal="true" aria-labelledby="stopTitle"
+     style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+     z-index:121;width:min(460px,92vw);padding:22px">
+  <h2 id="stopTitle" style="margin:0 0 8px;font-size:17px">结束考试</h2>
   <p class="muted" style="margin:0 0 14px;font-size:13px" id="stopTip">
     将强制所有学生交卷（没做的按 0 分），并关闭学生端客户端。
   </p>
@@ -81,22 +86,18 @@ function doStop(clearLogin){
 <div class="grid" style="margin-bottom:20px" id="stats-grid">
   <div class="stat"><div class="n" id="stat-total">-</div>
     <div class="t">本场学生数</div></div>
-  <div class="stat" style="border-top-color:var(--green)">
-    <div class="n" style="color:var(--green)" id="stat-online">-</div><div class="t">在线</div></div>
-  <div class="stat" style="border-top-color:var(--orange)">
-    <div class="n" style="color:var(--orange)" id="stat-submitted">-</div><div class="t">已交卷</div></div>
-  <div class="stat" style="border-top-color:#8494a8">
-    <div class="n">{{ exams|length }}</div><div class="t">考试场次</div></div>
+  <div class="stat"><div class="n" id="stat-online">-</div><div class="t">在线</div></div>
+  <div class="stat"><div class="n" id="stat-submitted">-</div><div class="t">已交卷</div></div>
+  <div class="stat"><div class="n">{{ exams|length }}</div><div class="t">考试场次</div></div>
 </div>
 
 <!-- 所有考试（每场独立控制） -->
 <div class="card">
   <h2>所有考试</h2>
   {% for e in exams %}
-  <div style="border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:12px;
-              {% if e.status=='running' %}border-left:4px solid var(--green);background:var(--green-l){% elif e.status=='paused' %}border-left:4px solid var(--orange);background:var(--orange-l){% endif %}">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-      <span style="font-size:1.0625rem;font-weight:700">{{ e.title }}</span>
+  <article class="exam-card status-{{ e.status }}">
+    <div class="head-actions" style="margin-bottom:12px">
+      <span class="exam-title">{{ e.title }}</span>
       {% if e.code %}<span class="tag code" title="考试编号（新建考试时自动生成）">{{ e.code }}</span>{% endif %}
       <span class="tag {{ 'ok' if e.status=='running' else 'warn' if e.status=='paused' else 'info' if e.status=='draft' else 'gray' }}">
         {{ '进行中' if e.status=='running' else '已暂停' if e.status=='paused' else '未开始' if e.status=='draft' else '已结束' }}
@@ -174,7 +175,7 @@ function doStop(clearLogin){
         </form>
       {% endif %}
     </div>
-  </div>
+  </article>
   {% else %}
   <div class="empty">还没有考试，点「新建考试」开始。</div>
   {% endfor %}
@@ -276,7 +277,7 @@ function doStop(clearLogin){
         ExamChart.donut('c-online', {
           labels: ['在线', '离线'],
           values: [data.online, Math.max(0, data.total - data.online)]
-        }, { colors: ['#16a34a', '#cbd5e1'], emptyMsg: '还没有学生机连接' });
+        }, { colors: ['#20C46A', '#E6F7FB'], emptyMsg: '还没有学生机连接' });
 
         // 更新学生表
         var tbody = document.getElementById('students-tbody');
@@ -295,7 +296,7 @@ function doStop(clearLogin){
             } else {
               onlineTag = '<span class="tag no">离线</span>';
             }
-            var rowStyle = (!s.online && s.raw_status !== 'submitted') ? ' style="opacity:0.6"' : '';
+            var rowStyle = (!s.online && s.raw_status !== 'submitted') ? ' class="is-offline"' : '';
             html += '<tr' + rowStyle + '>'
               + '<td>' + esc(s.seat||'-') + '</td>'
               + '<td><b>' + esc(s.name||'-') + '</b></td>'
@@ -333,17 +334,17 @@ function doStop(clearLogin){
         ExamChart.donut('c-theory', {
           labels: ['已交理论题', '未交'],
           values: [theoryDone, Math.max(0, n - theoryDone)]
-        }, { colors: ['#3b82f6', '#e2e8f0'], emptyMsg: '还没有学生' });
+        }, { colors: ['#38BDF8', '#E6F7FB'], emptyMsg: '还没有学生' });
         setText('c-theory-hint', theoryDone + ' / ' + n + ' 人');
 
         ExamChart.donut('c-practice', {
           labels: ['已交实操题', '未交'],
           values: [practiceDone, Math.max(0, n - practiceDone)]
-        }, { colors: ['#16a34a', '#e2e8f0'], emptyMsg: '还没有学生' });
+        }, { colors: ['#8B7CF6', '#E6E6FA'], emptyMsg: '还没有学生' });
         setText('c-practice-hint', practiceDone + ' / ' + n + ' 人');
 
-        // 同样五段色阶（浅黄在白底上看不见，换成 ≥3:1 的色）
-        var segColor = ['#dc2626','#d97706','#2563eb','#0891b2','#15803d'];
+        // 五段 Memphis 粉彩，柱体描边和数值文字由图表统一保持海军蓝。
+        var segColor = ['#FFB4AA','#F6C945','#38BDF8','#8B7CF6','#20C46A'];
         ExamChart.bar('c-live-dist', d.dist || {labels:[],values:[]}, {
           name: '人数', colors: segColor, showLabel: true, rotate: 10,
           emptyMsg: '还没有成绩数据'

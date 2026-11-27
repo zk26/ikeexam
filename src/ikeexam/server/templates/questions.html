@@ -2,9 +2,13 @@
 {% block title %}题库管理{% endblock %}
 {% block body %}
 
-<div class="row" style="justify-content:space-between;margin-bottom:16px">
-  <h1 style="margin:0">题库管理</h1>
-  <div class="bar" style="margin:0">
+<div class="page-head">
+  <div>
+    <div class="page-kicker">{{ icon('book', 14) }} 好题积累站</div>
+    <h1>题库管理</h1>
+    <p class="muted">按难度与来源整理，组卷时更顺手。</p>
+  </div>
+  <div class="head-actions">
     <button class="btn green" onclick="document.getElementById('impq').click()">
       {{ icon('upload') }} 导入题库</button>
     <a class="btn ghost" href="/questions/template">{{ icon('download') }} 下载模板</a>
@@ -19,6 +23,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <button class="btn ghost">整理分类</button>
     </form>
+  </div>
   </div>
 </div>
 

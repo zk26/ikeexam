@@ -2,14 +2,17 @@
 {% block title %}配置考试{% endblock %}
 {% block body %}
 
-<div class="row" style="justify-content:space-between;margin-bottom:16px">
-  <h1 style="margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<div class="page-head">
+  <div>
+    <div class="page-kicker">{{ icon('edit', 14) }} 考试配置</div>
+    <h1 style="margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     {{ exam.title }}
     {% if exam.code %}<span class="tag code" title="考试编号（新建时自动生成）">{{ exam.code }}</span>{% endif %}
     {% if exam.klass %}<span class="tag gray">班级：{{ exam.klass }}</span>
     {% else %}<span class="tag gray" title="点「开始考试」时会让你填班级">未分班</span>{% endif %}
   </h1>
-  <div class="bar" style="margin:0">
+  </div>
+  <div class="head-actions">
     <a class="btn ghost" href="/">← 返回控制台</a>
     <a class="btn ghost" href="/exam/{{ exam.id }}/export">导出考试包</a>
   </div>
@@ -41,15 +44,16 @@
 {% endif %}
 
 <!-- 勾选自动保存的小提示（右上角，一闪而过） -->
-<span id="quickTip" style="display:none;position:fixed;top:14px;right:18px;z-index:99;
-      background:var(--green);color:#fff;padding:6px 14px;border-radius:20px;
-      font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.18)"></span>
+<span id="quickTip" class="quick-tip" role="status" aria-live="polite"
+      style="display:none;position:fixed;top:14px;right:18px;z-index:130;
+      padding:8px 16px;font-size:13px"></span>
 
 <!-- 标签页导航（全部题型都在这里；绿点 = 这场考它） -->
-<div style="display:flex;gap:0;border-bottom:2px solid var(--line);margin-bottom:16px;
-            flex-wrap:wrap" id="tab-nav">
+<div class="tabbar" id="tab-nav" role="tablist" aria-label="考试配置分类">
   {% for k, l in type_tabs.items %}
   <button type="button" class="tab-btn{% if k == active %} active{% endif %}" data-tab="{{ k }}"
+          role="tab" id="tab-btn-{{ k }}" aria-controls="tab-{{ k }}"
+          aria-selected="{{ 'true' if k == active else 'false' }}"
           onclick="showTab('{{ k }}')">{{ l }}<span class="dot" title="这场考试考这个题型"></span><span class="dirty-note">待保存</span></button>
   {% endfor %}
 </div>
@@ -60,18 +64,15 @@
 </p>
 
 <style>
-.tab-btn{position:relative;padding:10px 18px;border:none;background:none;
-         cursor:pointer;font-size:.875rem;font-weight:500;color:var(--ink-2);
-         border-bottom:2px solid transparent;margin-bottom:-2px;min-height:42px;
-         transition:color var(--t),background var(--t),border-color var(--t);
-         font-family:inherit;border-radius:var(--r-xs) var(--r-xs) 0 0}
-.tab-btn:hover{color:var(--ink);background:var(--line-2)}
-.tab-btn.active{color:#fff;background:var(--brand);border-bottom-color:var(--brand);
-                font-weight:700;box-shadow:0 3px 10px rgba(59,130,246,.2)}
-/* 指示条入场：从中心展开（transform 动画，不顶动布局） */
-.tab-btn.active::after{content:"";position:absolute;left:10px;right:10px;
-       bottom:-2px;height:3px;background:var(--brand-d);border-radius:2px;
-       animation:tabIn .22s cubic-bezier(0,0,.2,1) both}
+.tab-btn{position:relative;min-height:44px;padding:10px 16px;border:2px solid var(--navy);
+         border-radius:10px;background:var(--white);color:var(--navy);cursor:pointer;
+         font:800 .875rem var(--font);box-shadow:3px 3px 0 var(--navy);
+         transition:background var(--t),transform var(--t),box-shadow var(--t)}
+.tab-btn:hover{background:var(--sky)}
+.tab-btn.active{background:var(--green);color:var(--navy);transform:translateY(2px);
+                box-shadow:1px 1px 0 var(--navy)}
+.tab-btn.active::after{content:"";position:absolute;left:12px;right:12px;bottom:3px;
+       height:2px;background:var(--navy);border-radius:2px}
 @keyframes tabIn{from{transform:scaleX(.4);opacity:0}
                  to{transform:scaleX(1);opacity:1}}
 .tab-btn .dot{display:none;width:8px;height:8px;border-radius:50%;
@@ -79,18 +80,18 @@
               box-shadow:0 0 0 2px var(--green-l)}
 .tab-btn.on .dot{display:inline-block;animation:fadeUp .2s ease both}
 .tab-btn .dirty-note{display:none;margin-left:6px;font-size:11px;font-weight:600}
-.tab-btn.dirty{color:var(--orange-d);box-shadow:inset 0 -3px var(--orange)}
-.tab-btn.active.dirty{color:#fff}
-.tab-btn.dirty .dirty-note{display:inline;color:var(--orange-d)}
-.tab-btn.active.dirty .dirty-note{color:#fff}
+.tab-btn.dirty{background:var(--coral);color:var(--navy)}
+.tab-btn.active.dirty{background:var(--yellow);color:var(--navy)}
+.tab-btn.dirty .dirty-note{display:inline;color:var(--navy)}
+.tab-btn.active.dirty .dirty-note{color:var(--navy)}
 .tab-panel{display:none}
 .tab-panel.active{display:block;animation:fadeUp .18s ease both}
 /* 题型开关（每个题型页开头）：整条可点，开启时描品牌色边 */
-.type-on{display:flex;align-items:center;gap:8px;padding:10px 14px;margin:0 0 14px;
-         border:1px solid var(--line);border-radius:var(--r-s);background:var(--line-2);
-         cursor:pointer;font-weight:600;
-         transition:border-color var(--t),background var(--t)}
-.type-on:hover{border-color:var(--brand-200);background:var(--brand-l)}
+.type-on{display:flex;align-items:center;gap:10px;min-height:52px;padding:12px 14px;
+         margin:0 0 18px;border:2px solid var(--navy);border-radius:12px;
+         background:var(--lemon);box-shadow:3px 3px 0 var(--navy);cursor:pointer;font-weight:800}
+.type-on:hover{background:var(--yellow)}
+.type-on:has(input:checked){background:var(--mint)}
 .type-on input{width:18px;height:18px;min-width:18px;flex:none}
 .type-body{transition:opacity var(--t)}
 .type-body.off{display:none}   /* 没勾的题型：配置区直接藏起来，不灰显 */
@@ -100,7 +101,7 @@
 .qTable tr.selected td:first-child{box-shadow:inset 3px 0 var(--green)}
 tr.pending-remove td{text-decoration:line-through;background:var(--red-l)}
 .exam-scroll{overscroll-behavior:auto;scrollbar-gutter:stable}
-.exam-scroll:focus{outline:2px solid var(--brand);outline-offset:2px}
+.exam-scroll:focus{outline:3px solid var(--navy);outline-offset:3px}
 .bottom-actions[hidden]{display:none!important}
 </style>
 
@@ -109,7 +110,7 @@ tr.pending-remove td{text-decoration:line-through;background:var(--red-l)}
 <input type="hidden" name="tab" id="currentTab" value="{{ active }}">
 
 <!-- ========== 基本设置 ========== -->
-<div class="tab-panel active" id="tab-basic">
+<div role="tabpanel" class="tab-panel active" id="tab-basic">
 <div class="card">
   <h2>基本信息</h2>
   <div class="row">
@@ -187,8 +188,7 @@ tr.pending-remove td{text-decoration:line-through;background:var(--red-l)}
     </span>
   </div>
   {% if roster %}
-  <div style="margin-top:8px;background:#fff;border:1px solid var(--line);
-              border-radius:var(--r-s);padding:10px 12px" id="rosterList">
+  <div class="surface-soft" style="margin-top:12px;background:var(--white)" id="rosterList">
     {% for r in roster %}
     <span class="tag gray" style="margin:2px">{{ r.name }}
       {% if r.seat %}<span class="muted">· {{ r.seat }}</span>{% endif %}
@@ -252,8 +252,8 @@ function delRoster(rid){
         <div class="t">{{ dict(qtype_tabs).get(k, k) }}</div></div>
     {% endfor %}
     <div class="stat" style="min-width:100px"><div class="n">{{ tasks|length }}</div><div class="t">操作题</div></div>
-    <div class="stat" style="min-width:100px;border-top-color:var(--green)"><div class="n">{{ qs|length }}</div><div class="t">理论题合计</div></div>
-    <div class="stat" style="min-width:100px;border-top-color:var(--orange)"><div class="n">{{ qsum }}</div><div class="t">理论满分</div></div>
+    <div class="stat" style="min-width:100px"><div class="n">{{ qs|length }}</div><div class="t">理论题合计</div></div>
+    <div class="stat" style="min-width:100px"><div class="n">{{ qsum }}</div><div class="t">理论满分</div></div>
   </div>
   {% if qs %}
   <div class="bar">
@@ -267,7 +267,7 @@ function delRoster(rid){
 </div><!-- /tab-basic -->
 
 <!-- ========== 打字练习（小学）========== -->
-<div class="tab-panel{% if active == 'typing' %} active{% endif %}" id="tab-typing">
+<div role="tabpanel" class="tab-panel{% if active == 'typing' %} active{% endif %}" id="tab-typing">
 <div class="card">
   <label class="type-on">
     <input type="checkbox" name="qtypes" value="typing" class="qtype-cb"
@@ -283,8 +283,7 @@ function delRoster(rid){
       {% for k, l in [('whack_mole','① 打地鼠（鼠标）'),('key_press','② 看键按键（大写）'),
                       ('case_press','③ 小写字母找按键'),('typing_en','④ 英文打字'),
                       ('typing_zh','⑤ 中文打字'),('name_typing','⑥ 打名字测试')] %}
-      <label style="border:1px solid var(--line);border-radius:var(--r-s);
-                    padding:5px 12px;cursor:pointer;background:#fff">
+      <label class="check-chip">
         <input type="checkbox" name="typing_enable_{{ k }}" value="1"
                class="typing-enable" data-task="{{ k }}"
                {% if typing_cfg[k].enabled %}checked{% endif %}>
@@ -459,8 +458,7 @@ function delRoster(rid){
         不用老师录词表：<b>系统按学生机上填的姓名自动认出学生，每人打的就是他自己的名字</b>，
         拼音提示也是自动生成的。
       </div>
-      <div id="rosterBox" style="background:#fff;border:1px solid var(--line);border-radius:var(--r-s);
-                  padding:10px 12px">
+      <div id="rosterBox" class="surface-soft" style="background:var(--white)">
         {% if typing_roster.count %}
         <div style="margin-bottom:6px">
           本场已自动识别 <b>{{ typing_roster.count }}</b> 名学生：
@@ -510,12 +508,15 @@ function delRoster(rid){
     </div>
 
     <style>
-      .vk-panel{margin:8px 0 4px;padding:10px;background:#fff;border:1px solid var(--line);border-radius:var(--r-s)}
-      .vk-row{display:flex;gap:5px;margin-bottom:5px;flex-wrap:wrap}
-      .vk{min-width:34px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;
-          background:#fff;cursor:pointer;font-size:13px}
-      .vk:hover{border-color:var(--brand)}
-      .vk.on{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:700}
+      .vk-panel{margin:10px 0 6px;padding:12px;background:var(--white);
+                border:2px solid var(--navy);border-radius:12px;box-shadow:3px 3px 0 var(--navy)}
+      .vk-row{display:flex;gap:7px;margin-bottom:7px;flex-wrap:wrap}
+      .vk{min-width:38px;min-height:38px;padding:6px 9px;border:2px solid var(--navy);
+          border-radius:8px;background:var(--white);color:var(--navy);cursor:pointer;
+          font:800 13px var(--font);box-shadow:2px 2px 0 var(--navy)}
+      .vk:hover{background:var(--sky)}
+      .vk.on{background:var(--green);color:var(--navy);border-color:var(--navy);
+              transform:translateY(1px);box-shadow:1px 1px 0 var(--navy)}
       .vk-tools{display:flex;gap:8px;align-items:center;margin-top:6px}
       .crop-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 4px 0}
     </style>
@@ -612,7 +613,7 @@ function delRoster(rid){
 </div><!-- /tab-typing -->
 
 <!-- ========== 画图题（画板创作 / 拼豆题） ========== -->
-<div class="tab-panel{% if active == 'drawing' %} active{% endif %}" id="tab-drawing">
+<div role="tabpanel" class="tab-panel{% if active == 'drawing' %} active{% endif %}" id="tab-drawing">
 <div class="card">
   <label class="type-on">
     <input type="checkbox" name="qtypes" value="drawing" class="qtype-cb"
@@ -663,7 +664,7 @@ function delRoster(rid){
 
 <!-- ========== 理论题型标签页（每种题型一个页面，全都显示）========== -->
 {% for type_key, type_label in qtype_tabs %}
-<div class="tab-panel{% if active == type_key %} active{% endif %}" id="tab-{{ type_key }}">
+<div role="tabpanel" class="tab-panel{% if active == type_key %} active{% endif %}" id="tab-{{ type_key }}">
 <div class="card">
   <label class="type-on">
     <input type="checkbox" name="qtypes" value="{{ type_key }}" class="qtype-cb"
@@ -750,7 +751,7 @@ function delRoster(rid){
 {% endfor %}
 
 <!-- ========== 操作题 ========== -->
-<div class="tab-panel{% if active == 'practice' %} active{% endif %}" id="tab-practice">
+<div role="tabpanel" class="tab-panel{% if active == 'practice' %} active{% endif %}" id="tab-practice">
 <div class="card">
   <label class="type-on">
     <input type="checkbox" name="qtypes" value="practice" class="qtype-cb"
@@ -761,8 +762,7 @@ function delRoster(rid){
   <div class="row" style="margin:0 0 10px">
     <label class="muted">操作题类型</label>
     {% for k, l in [('word','WPS 文字'),('excel','WPS 表格'),('ppt','WPS 演示')] %}
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);
-                  padding:6px 12px;cursor:pointer;background:#fff">
+    <label class="check-chip">
       <input type="checkbox" name="practice_types" value="{{ k }}"
              {% if k in practice_types %}checked{% endif %}>
       {{ l }}
@@ -776,7 +776,7 @@ function delRoster(rid){
 </div><!-- /type-body -->
 </div><!-- /card -->
 
-<div class="card" style="background:var(--brand-l);border-color:var(--brand-200)">
+<div class="card" style="background:var(--sky)">
   <h2>从实操题库挑题（推荐）</h2>
   <p class="muted" style="margin-bottom:10px">
     题库里每套题都配好了素材、考试要求和评分规则，点一下就装进来。
@@ -866,7 +866,7 @@ function delRoster(rid){
 <!-- 底部统一保存：选题页只保存当前题型，其他设置页保存全部设置 -->
 {% set selection_tabs = qtype_tabs + [('practice', '实操')] %}
 {% set selection_active = active in selection_tabs | map(attribute=0) | list %}
-<div style="position:sticky;bottom:0;background:var(--bg);padding:12px 0;border-top:1px solid var(--line);z-index:10">
+<div class="bottom-action-bar">
   <div class="bar bottom-actions" id="selectionActions"{% if not selection_active %} hidden{% endif %}>
     {% if exam.status in ('running', 'paused') %}
     <button type="button" class="btn gray lg" disabled
@@ -1089,11 +1089,13 @@ function showTab(name){
     return;
   }
   document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active')});
-  document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active')});
+  document.querySelectorAll('.tab-btn').forEach(function(b){
+    b.classList.remove('active'); b.setAttribute('aria-selected', 'false');
+  });
   var panel = document.getElementById('tab-'+name);
   if(panel) panel.classList.add('active');
   var btn = document.querySelector('.tab-btn[data-tab="' + name + '"]');
-  if(btn) btn.classList.add('active');
+  if(btn){ btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
   // 同步隐藏字段
   if(ct) ct.value = name;
   updateBottomActions(name);
@@ -1166,7 +1168,8 @@ function quickTip(msg, bad){
   var t = document.getElementById('quickTip');
   if(!t) return;
   t.textContent = msg;
-  t.style.background = bad ? '#c0392b' : 'var(--green)';
+  t.style.background = bad ? 'var(--danger)' : 'var(--green)';
+  t.style.color = bad ? '#FFFFFF' : 'var(--navy)';
   t.style.display = 'inline';
   clearTimeout(quickTip._h);
   quickTip._h = setTimeout(function(){ t.style.display = 'none'; }, 2200);

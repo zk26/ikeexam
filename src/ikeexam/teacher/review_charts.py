@@ -12,16 +12,26 @@ try:
 except ImportError:
     from visual_config import ScrollableFrame
 
-FONT = "Microsoft YaHei"
-BG = "#F5F7FA"
-CARD = "#FFFFFF"
-INK = "#1F2937"
-GRAY = "#6B7280"
-BLUE = "#2563EB"
-GREEN = "#15803D"
-ORANGE = "#D97706"
-RED = "#DC2626"
-LINE = "#DCE3EC"
+_UI = ui_theme.LIGHT
+FONT = "Microsoft YaHei UI"
+BG = _UI["bg"]
+CARD = _UI["surface"]
+INK = _UI["text"]
+GRAY = _UI["text_muted"]
+BLUE = _UI["info"]
+GREEN = _UI["success"]
+ORANGE = _UI["warning"]
+RED = _UI["danger"]
+LINE = _UI["border"]
+
+
+def _iconify(win):
+    icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.ico")
+    if os.path.isfile(icon):
+        try:
+            win.iconbitmap(icon)
+        except tk.TclError:
+            pass
 
 
 def _tree(parent, columns, headings, widths, stretch=None, height=12):
@@ -70,6 +80,7 @@ class ReviewWindow:
         self.top.geometry("1120x740")
         self.top.minsize(940, 620)
         self.top.configure(bg=BG)
+        _iconify(self.top)
         self.top.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
         self._load()
@@ -473,6 +484,7 @@ class ChartsWindow:
         self.top.geometry("1120x740")
         self.top.minsize(940, 620)
         self.top.configure(bg=BG)
+        _iconify(self.top)
         self.top.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
         self._load()

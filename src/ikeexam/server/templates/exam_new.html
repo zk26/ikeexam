@@ -2,6 +2,7 @@
 {% block title %}新建考试{% endblock %}
 {% block body %}
 <div class="card">
+<div class="page-kicker">{{ icon('sun', 14) }} 一场新考试，马上出发</div>
 <h1>新建考试</h1>
 <form method="post">
   <div class="row">
@@ -19,57 +20,57 @@
   <h2>选择题型（可多选）</h2>
   <p class="muted" style="margin-bottom:12px">勾选本次考试要包含的题型，学生可以按任意顺序完成</p>
 
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:16px">
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+  <div class="choice-grid">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="single" checked style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">单选题</div>
         <div class="muted">计算机基础、WPS知识、程序输出等</div>
       </div>
     </label>
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="multi" checked style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">多选题</div>
         <div class="muted">可选多个答案</div>
       </div>
     </label>
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="judge" checked style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">判断题</div>
         <div class="muted">判断对错，含程序输出判断</div>
       </div>
     </label>
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="blank" checked style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">填空题</div>
         <div class="muted">文字填空</div>
       </div>
     </label>
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="code" style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">程序填空题</div>
         <div class="muted">补全代码，可在本地运行验证</div>
       </div>
     </label>
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="drag" style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">拖拽题</div>
         <div class="muted">把项目拖到对应格子里（会考常考题型）</div>
       </div>
     </label>
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="practice" style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">WPS 操作题</div>
         <div class="muted">Word / Excel / PPT 实操</div>
       </div>
     </label>
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="typing" style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">打字练习（小学）</div>
@@ -77,7 +78,7 @@
         每一项都能单独开关，参数在「编辑考试」里调整</div>
       </div>
     </label>
-    <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:12px;cursor:pointer;display:flex;align-items:center;gap:10px">
+    <label class="choice-card">
       <input type="checkbox" name="qtypes" value="drawing" style="width:18px;height:18px">
       <div>
         <div style="font-weight:600">画板创作</div>
@@ -87,18 +88,18 @@
     </label>
   </div>
 
-  <div id="practice-options" style="display:none;border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:16px;background:var(--line-2)">
+  <div id="practice-options" class="surface-soft" style="display:none;margin-bottom:20px;background:var(--sky)">
     <h3 style="margin-top:0">操作题设置（可多选组合）</h3>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-      <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:8px">
+      <label class="check-chip">
         <input type="checkbox" name="practice_types" value="word" style="width:16px;height:16px">
         <span>WPS 文字（.docx）</span>
       </label>
-      <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:8px">
+      <label class="check-chip">
         <input type="checkbox" name="practice_types" value="excel" checked style="width:16px;height:16px">
         <span>WPS 表格（.xlsx）</span>
       </label>
-      <label style="border:1px solid var(--line);border-radius:var(--r-s);padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:8px">
+      <label class="check-chip">
         <input type="checkbox" name="practice_types" value="ppt" style="width:16px;height:16px">
         <span>WPS 演示（.pptx）</span>
       </label>

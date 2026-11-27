@@ -462,7 +462,7 @@ class App:
         """兜底错误页"""
         def b(p):
             card = tk.Frame(p, bg=CARD, padx=40, pady=30,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             card.place(relx=0.5, rely=0.5, anchor="center")
             tk.Label(card, text="加载出错", bg=CARD, fg=RED,
                      font=(FONT, 16, "bold")).pack(pady=(0, 10))
@@ -470,7 +470,7 @@ class App:
                      font=(FONT, 11), wraplength=400,
                      justify="center").pack()
             tk.Button(card, text="重试", command=self.refresh,
-                      bg=BLUE, fg="white", font=(FONT, 11),
+                      bg=BLUE, fg=INK, font=(FONT, 11),
                       padx=20, pady=6, relief="flat").pack(pady=(16, 0))
         self.swap(b)
 
@@ -602,10 +602,14 @@ class App:
         """填姓名 + 座位号才能进"""
         wrap = tk.Frame(f if f else self.root, bg=BG)
         wrap.pack(fill="both", expand=True)
+        banner = ui_theme.MemphisBanner(
+            wrap, title="阳光考试季", subtitle="认真作答，你也可以很棒", height=78,
+            tokens=self.ui_tokens)
+        banner.pack(fill="x")
 
-        card = tk.Frame(wrap, bg=CARD, padx=64, pady=56,
-                        highlightbackground=LINE, highlightthickness=1)
-        card.place(relx=0.5, rely=0.5, anchor="center")
+        card = tk.Frame(wrap, bg=CARD, padx=52, pady=38,
+                        highlightbackground=LINE, highlightthickness=2)
+        card.place(relx=0.5, rely=0.58, anchor="center")
 
         # Logo / 标题
         logo_frame = tk.Frame(card, bg=CARD)
@@ -618,7 +622,7 @@ class App:
             self.login_logo = ImageTk.PhotoImage(image)
             tk.Label(logo_frame, image=self.login_logo, bg=CARD).pack()
         else:
-            logo = tk.Label(logo_frame, text="考", bg=BLUE, fg="white",
+            logo = tk.Label(logo_frame, text="考", bg=BLUE, fg=INK,
                             font=(FONT, 18, "bold"),
                             width=3, height=1, relief="flat")
             logo.pack()
@@ -634,7 +638,7 @@ class App:
                  font=(FONT, 12), fg=INK).pack(side="left")
         self.e_name = tk.Entry(row1, font=(FONT, 14), width=28,
                                relief="solid", bd=1, highlightcolor=BLUE,
-                               highlightthickness=1)
+                               highlightthickness=2)
         self.e_name.pack(side="left", ipady=8)
         self.e_name.insert(0, self.cfg.name)
 
@@ -645,7 +649,7 @@ class App:
                  font=(FONT, 12), fg=INK).pack(side="left")
         self.e_seat = tk.Entry(row2, font=(FONT, 14), width=28,
                                relief="solid", bd=1, highlightcolor=BLUE,
-                               highlightthickness=1)
+                               highlightthickness=2)
         self.e_seat.pack(side="left", ipady=8)
         self.e_seat.insert(0, self.cfg.seat)
 
@@ -657,7 +661,7 @@ class App:
                  bg=CARD, fg=GRAY, font=(FONT, 9)).pack(pady=(2, 0))
 
         tk.Button(card, text="进  入", command=self.do_login,
-                  bg=BLUE, fg="white", font=(FONT, 14, "bold"),
+                  bg=BLUE, fg=INK, font=(FONT, 14, "bold"),
                   width=24, pady=12, relief="flat", cursor="hand2",
                   activebackground=BLUE_D).pack(pady=(18, 8))
         tk.Button(card, text="免密码进入（按 IP 识别）", command=self.do_passwordless,
@@ -673,6 +677,7 @@ class App:
                   bg=CARD, fg=GRAY, font=(FONT, 9), relief="flat",
                   cursor="hand2", activebackground=CARD,
                   activeforeground=BLUE).pack(pady=(6, 0))
+        ui_theme.add_hard_shadow(card, 6, LINE)
 
         # 回车快捷提交
         self.e_name.bind("<Return>", lambda e: self.e_seat.focus())
@@ -792,7 +797,7 @@ class App:
         wrap = tk.Frame(f if f else self.root, bg=BG)
         wrap.pack(fill="both", expand=True)
         card = tk.Frame(wrap, bg=CARD, padx=48, pady=42,
-                        highlightbackground=LINE, highlightthickness=1)
+                        highlightbackground=LINE, highlightthickness=2)
         card.place(relx=0.5, rely=0.5, anchor="center")
 
         tk.Label(card, text="正在连接考试服务器", bg=CARD,
@@ -812,7 +817,7 @@ class App:
         bar = tk.Frame(card, bg=CARD)
         bar.pack(pady=(18, 0))
         tk.Button(bar, text="重新寻找服务器", command=self.retry_connect,
-                  bg=BLUE, fg="white", font=(FONT, 11, "bold"),
+                  bg=BLUE, fg=INK, font=(FONT, 11, "bold"),
                   padx=16, pady=8, relief="flat", cursor="hand2",
                   activebackground=BLUE_D).pack(side="left", padx=4)
         self.btn_manual = tk.Button(
@@ -989,7 +994,7 @@ class App:
 
         bar = tk.Frame(card, bg=CARD)
         bar.pack(pady=(14, 0))
-        connect_btn = tk.Button(bar, text="连接", command=ok, bg=BLUE, fg="white",
+        connect_btn = tk.Button(bar, text="连接", command=ok, bg=BLUE, fg=INK,
                                 font=(FONT, 11), padx=20, pady=6,
                                 relief="flat", cursor="hand2")
         connect_btn.pack(side="left", padx=5)
@@ -1017,12 +1022,12 @@ class App:
         # 只在已经进了考试界面后才显示横幅
         if not self._connected_once:
             return
-        self.banner = tk.Frame(self.root, bg=RED, height=34)
+        self.banner = tk.Frame(self.root, bg=_UI["coral"], height=34)
         self.banner.pack(fill="x", side="top")
         self.banner.pack_propagate(False)
         tk.Label(self.banner,
                  text=f"连接已断开，正在自动重连…（{msg}）",
-                 bg=RED, fg="white",
+                 bg=_UI["coral"], fg=INK,
                  font=(FONT, 11)).pack(expand=True)
 
     # ---------- 界面 1：等待 ----------
@@ -1034,11 +1039,11 @@ class App:
         swap 会把新建的 Frame 传进来。签名对不上就会白屏（见 _call_builder）。
         """
         def b(p):
-            # 顶部蓝色标题栏
-            top = tk.Frame(p, bg=BLUE, height=60)
+            # 顶部几何标题栏
+            top = tk.Frame(p, bg=_UI["lavender"], height=60)
             top.pack(fill="x", side="top")
             top.pack_propagate(False)
-            tk.Label(top, text="ikee考务中心", bg=BLUE, fg="white",
+            tk.Label(top, text="ikee考务中心", bg=_UI["lavender"], fg=INK,
                      font=(FONT, 18, "bold")).pack(expand=True)
 
             # 主体区域
@@ -1047,7 +1052,7 @@ class App:
 
             # 居中的卡片
             card = tk.Frame(body, bg=CARD, padx=54, pady=44,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             card.place(relx=0.5, rely=0.45, anchor="center")
 
             # 标题
@@ -1055,14 +1060,15 @@ class App:
                      font=(FONT, 22, "bold")).pack(pady=(0, 16))
 
             # 身份信息卡片
-            info_frame = tk.Frame(card, bg=BLUE_L, padx=22, pady=14)
+            info_frame = tk.Frame(card, bg=_UI["mint"], padx=22, pady=14,
+                                  highlightbackground=LINE, highlightthickness=2)
             info_frame.pack(fill="x", pady=(0, 12))
             who = f"{self.cfg.name or '免密码考生'}　座位 {self.cfg.seat or '按 IP 识别'}"
-            tk.Label(info_frame, text=who, bg=BLUE_L, fg=BLUE_D,
+            tk.Label(info_frame, text=who, bg=_UI["mint"], fg=INK,
                      font=(FONT, 17, "bold")).pack()
             tk.Label(info_frame, text=f"本机: {self.cfg.hostname}"
                                       f"（标识 {self.cfg.client_id}）",
-                     bg=BLUE_L, fg=GRAY,
+                     bg=_UI["mint"], fg=GRAY,
                      font=(FONT, 11)).pack()
 
             # 服务器信息
@@ -1082,7 +1088,7 @@ class App:
             bar = tk.Frame(card, bg=CARD)
             bar.pack()
             tk.Button(bar, text="重新寻找服务器", command=self.rediscover,
-                      bg=BLUE, fg="white", font=(FONT, 11),
+                      bg=BLUE, fg=INK, font=(FONT, 11),
                       padx=16, pady=6, relief="flat").pack(side="left", padx=4)
             tk.Button(bar, text="刷新状态", command=self.refresh,
                       font=(FONT, 11),
@@ -1186,37 +1192,37 @@ class App:
         self._drawn_tabs = [k for k, _l, _t in tabs]
 
         def b(p):
-            nav = tk.Frame(p, bg=BLUE, height=60)
+            nav = tk.Frame(p, bg=_UI["lavender"], height=64)
             nav.pack(fill="x")
             nav.pack_propagate(False)
-            tk.Label(nav, text=title, bg=BLUE, fg="white",
+            tk.Label(nav, text=title, bg=_UI["lavender"], fg=INK,
                      font=(FONT, 14, "bold")).pack(side="left",
                                                                  padx=(16, 14))
             # 导航标签：题型多了放不下时可以横向滑动（左右箭头 + 滚轮）
-            tabs_wrap = tk.Frame(nav, bg=BLUE)
+            tabs_wrap = tk.Frame(nav, bg=_UI["lavender"])
             tabs_wrap.pack(side="left", fill="both", expand=True)
             tk.Button(tabs_wrap, text="◀",
                       command=lambda: self._tabs_xview(-1),
-                      bg=BLUE, fg="white", relief="flat", bd=0, width=2,
-                      cursor="hand2", activebackground=BLUE_D
+                      bg=_UI["lemon"], fg=INK, relief="solid", bd=2, width=2,
+                      cursor="hand2", activebackground=_UI["yellow"]
                       ).pack(side="left", fill="y")
             tk.Button(tabs_wrap, text="▶",
                       command=lambda: self._tabs_xview(1),
-                      bg=BLUE, fg="white", relief="flat", bd=0, width=2,
-                      cursor="hand2", activebackground=BLUE_D
+                      bg=_UI["lemon"], fg=INK, relief="solid", bd=2, width=2,
+                      cursor="hand2", activebackground=_UI["yellow"]
                       ).pack(side="right", fill="y")
-            tc = tk.Canvas(tabs_wrap, bg=BLUE, highlightthickness=0, height=42)
+            tc = tk.Canvas(tabs_wrap, bg=_UI["lavender"], highlightthickness=0, height=42)
             tc.pack(side="left", fill="both", expand=True)
-            inner = tk.Frame(tc, bg=BLUE)
+            inner = tk.Frame(tc, bg=_UI["lavender"])
             tc.create_window((0, 0), window=inner, anchor="nw")
             self.tab_btns = {}
             for key, label, _types in tabs:
                 btn = tk.Button(inner, text=label,
                                 command=lambda k=key: self.switch_tab(k),
-                                bg=BLUE, fg="#eff6ff", relief="flat", bd=0,
-                                font=(FONT, 11), padx=12, pady=6,
-                                cursor="hand2", activebackground=BLUE_D,
-                                activeforeground="white")
+                                bg=_UI["lemon"], fg=INK, relief="solid", bd=2,
+                                font=(FONT, 11, "bold"), padx=12, pady=6,
+                                cursor="hand2", activebackground=_UI["yellow"],
+                                activeforeground=INK)
                 btn.pack(side="left", padx=2, pady=9)
                 self.tab_btns[key] = btn
 
@@ -1245,20 +1251,20 @@ class App:
                       fg="white", font=(FONT, 11, "bold"),
                       padx=16, pady=4, relief="flat", cursor="hand2",
                       activebackground=RED_D).pack(side="right", padx=(8, 14))
-            clock = tk.Frame(nav, bg="#1e293b", padx=12, pady=2)
+            clock = tk.Frame(nav, bg=_UI["lavender"], padx=12, pady=2)
             clock.pack(side="right", padx=(0, 10))
-            tk.Label(clock, text="剩余时间", bg="#1e293b", fg="#94a3b8",
+            tk.Label(clock, text="剩余时间", bg=_UI["lavender"], fg=GRAY,
                      font=(FONT, 9)).pack()
-            self.time_label = tk.Label(clock, text="--:--", bg="#1e293b",
-                                       fg="white", font=("Consolas", 17, "bold"))
+            self.time_label = tk.Label(clock, text="--:--", bg=_UI["lavender"],
+                                       fg=INK, font=("Consolas", 17, "bold"))
             self.time_label.pack()
-            who = tk.Frame(nav, bg=BLUE)
+            who = tk.Frame(nav, bg=_UI["lavender"])
             who.pack(side="right", padx=8)
-            tk.Label(who, text=self.cfg.name, bg=BLUE, fg="white",
+            tk.Label(who, text=self.cfg.name, bg=_UI["lavender"], fg=INK,
                      font=(FONT, 11, "bold")).pack(anchor="e")
-            tk.Label(who, text=f"座位号 {self.cfg.seat}", bg=BLUE, fg="#eff6ff",
+            tk.Label(who, text=f"座位号 {self.cfg.seat}", bg=_UI["lavender"], fg=INK,
                      font=(FONT, 9)).pack(anchor="e")
-            self.save_label = tk.Label(nav, text="", bg=BLUE, fg="#bfdbfe",
+            self.save_label = tk.Label(nav, text="", bg=_UI["lavender"], fg=GRAY,
                                        font=(FONT, 9))
             self.save_label.pack(side="right", padx=6)
 
@@ -1314,8 +1320,8 @@ class App:
         for k, btn in (getattr(self, "tab_btns", None) or {}).items():
             try:
                 on = (k == key)
-                btn.config(bg="white" if on else BLUE,
-                           fg=BLUE_D if on else "#eff6ff",
+                btn.config(bg=_UI["mint"] if on else _UI["lemon"],
+                           fg=INK,
                            font=(FONT, 11, "bold" if on else "normal"))
             except Exception:
                 pass
@@ -1652,14 +1658,14 @@ class App:
         for w in self.content.winfo_children():
             w.destroy()
         card = tk.Frame(self.content, bg=CARD, padx=40, pady=30,
-                        highlightbackground=LINE, highlightthickness=1)
+                        highlightbackground=LINE, highlightthickness=2)
         card.place(relx=0.5, rely=0.5, anchor="center")
         tk.Label(card, text="试卷加载失败", bg=CARD, fg=RED,
                  font=(FONT, 16, "bold")).pack(pady=(0, 8))
         tk.Label(card, text=msg, bg=CARD, fg=GRAY, wraplength=400,
                  justify="center", font=(FONT, 11)).pack()
         tk.Button(card, text="重新加载", command=self._reload_paper,
-                  bg=BLUE, fg="white", font=(FONT, 11),
+                  bg=BLUE, fg=INK, font=(FONT, 11),
                   padx=20, pady=6, relief="flat").pack(pady=(16, 0))
 
     def _reload_paper(self):
@@ -1684,7 +1690,7 @@ class App:
 
         # 左：答题卡（只显示本页的题）
         side = tk.Frame(body, bg=CARD, width=250, padx=14, pady=14,
-                        highlightbackground=LINE, highlightthickness=1)
+                        highlightbackground=LINE, highlightthickness=2)
         side.pack(side="left", fill="y", padx=(0, 12))
         side.pack_propagate(False)
         tk.Label(side, text="答题卡", bg=CARD, fg=INK,
@@ -1709,7 +1715,7 @@ class App:
 
         # 右：题目区
         main = tk.Frame(body, bg=CARD, padx=24, pady=18,
-                        highlightbackground=LINE, highlightthickness=1)
+                        highlightbackground=LINE, highlightthickness=2)
         main.pack(side="left", fill="both", expand=True)
         meta = tk.Frame(main, bg=CARD)
         meta.pack(fill="x")
@@ -1985,7 +1991,7 @@ class App:
         选中的选项会变蓝底 + 蓝边 + 打勾，学生一眼就能看出自己选了哪个。
         """
         box = tk.Frame(self.opt_frame, bg=CARD, highlightbackground=LINE_2,
-                       highlightthickness=1, bd=0)
+                       highlightthickness=2, bd=0)
         box.pack(anchor="w", pady=4, fill="x", padx=2)
         row = tk.Frame(box, bg=CARD)
         row.pack(fill="x", padx=10, pady=6)
@@ -2046,12 +2052,12 @@ class App:
         saved_parts = [x.strip() for x in str(saved or "").split("||")]
         saved_parts += [""] * max(0, n_blank - len(saved_parts))
 
-        head = tk.Frame(parent, bg="#1e293b", padx=14, pady=6)
+        head = tk.Frame(parent, bg="#1E293B", padx=14, pady=6)
         head.pack(fill="x", pady=(0, 6))
         tk.Label(head,
                  text=f"  {lang.upper()} 程序填空（{n_blank} 个空）"
                       f" —— 直接在下面代码的空位里输入",
-                 bg="#1e293b", fg="#e2e8f0",
+                 bg="#1E293B", fg="#E2E8F0",
                  font=(FONT, 11, "bold")).pack(anchor="w")
 
         # ---- 代码区：空位用内嵌输入框，在原文上直接填 ----
@@ -2090,9 +2096,9 @@ class App:
                 width = max(6, min(26, len(var.get()) + 5))
                 e = tk.Entry(txt, textvariable=var, width=width,
                              font=("Consolas", 12), justify="center",
-                             bg="#1e293b", fg="#fbbf24",
+                             bg="#1E293B", fg="#fbbf24",
                              insertbackground="#fbbf24", relief="flat",
-                             highlightthickness=1,
+                             highlightthickness=2,
                              highlightbackground="#fbbf24")
                 e.bind("<KeyRelease>", lambda ev: self.save_code_blanks())
                 e.bind("<Return>", lambda ev: self.run_code())
@@ -2111,7 +2117,7 @@ class App:
         con = tk.Frame(parent, bg="#0f172a")
         con.pack(fill="x")
         tk.Label(con, text="输入（程序里 input() 按顺序读这些行，一行一个）",
-                 bg="#0f172a", fg="#94a3b8",
+                 bg="#0f172a", fg=GRAY,
                  font=(FONT, 10)).pack(anchor="w", padx=12, pady=(8, 2))
         self.stdin_box = tk.Text(con, height=3, bg="#111c30", fg="#fbbf24",
                                  relief="flat", font=("Consolas", 12),
@@ -2137,7 +2143,7 @@ class App:
             cursor="hand2" if _has_py else "arrow",
             activebackground=GREEN_D, state="normal" if _has_py else "disabled")
         self.run_btn.pack(side="left")
-        self.run_status = tk.Label(runbar, text="", bg="#0f172a", fg="#94a3b8",
+        self.run_status = tk.Label(runbar, text="", bg="#0f172a", fg=GRAY,
                                    font=(FONT, 10))
         self.run_status.pack(side="left", padx=12)
         if not _has_py:
@@ -2145,7 +2151,7 @@ class App:
                 text="本机没装 Python，无法运行（不影响作答和评分）",
                 fg="#fbbf24")
 
-        tk.Label(con, text="输出", bg="#0f172a", fg="#94a3b8",
+        tk.Label(con, text="输出", bg="#0f172a", fg=GRAY,
                  font=(FONT, 10)).pack(anchor="w", padx=12)
         self.run_out = tk.Text(con, height=7, bg="#111c30", fg="#4ade80",
                                relief="flat", font=("Consolas", 12),
@@ -2613,7 +2619,7 @@ class App:
             body = tk.Frame(p, bg=BG)
             body.pack(fill="both", expand=True)
             card = tk.Frame(body, bg=CARD, padx=52, pady=44,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             card.place(relx=0.5, rely=0.45, anchor="center")
             tk.Label(card, text="正在提交，请稍等…", bg=CARD, fg=BLUE_D,
                      font=(FONT, 22, "bold")).pack(pady=(0, 12))
@@ -2650,7 +2656,7 @@ class App:
             body = tk.Frame(p, bg=BG)
             body.pack(fill="both", expand=True)
             card = tk.Frame(body, bg=CARD, padx=52, pady=44,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             card.place(relx=0.5, rely=0.45, anchor="center")
             tk.Label(card, text="部分提交失败", bg=CARD, fg=RED,
                      font=(FONT, 22, "bold")).pack(pady=(0, 10))
@@ -2663,7 +2669,7 @@ class App:
                          bg=CARD, fg=GRAY, justify="left",
                          font=(FONT, 10)).pack(pady=(10, 0))
             tk.Button(card, text="重新提交", command=self.submit_all,
-                      bg=BLUE, fg="white", font=(FONT, 13, "bold"),
+                      bg=BLUE, fg=INK, font=(FONT, 13, "bold"),
                       padx=26, pady=8, relief="flat", cursor="hand2"
                       ).pack(pady=(18, 0))
         self.swap(b)
@@ -2676,7 +2682,7 @@ class App:
             body = tk.Frame(p, bg=BG)
             body.pack(fill="both", expand=True)
             card = tk.Frame(body, bg=CARD, padx=52, pady=46,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             card.place(relx=0.5, rely=0.45, anchor="center")
             tk.Label(card, text="✓ 交卷成功", bg=CARD, fg=GREEN,
                      font=(FONT, 26, "bold")).pack(pady=(0, 12))
@@ -2745,15 +2751,15 @@ class App:
         self.client.state["_prev_phase"] = prev
 
         def b(p):
-            top = tk.Frame(p, bg=ORANGE, height=56)
+            top = tk.Frame(p, bg=_UI["lemon"], height=56)
             top.pack(fill="x")
             top.pack_propagate(False)
-            tk.Label(top, text="考试已暂停", bg=ORANGE, fg="white",
+            tk.Label(top, text="考试已暂停", bg=_UI["lemon"], fg=INK,
                      font=(FONT, 16, "bold")).pack(expand=True)
             body = tk.Frame(p, bg=BG)
             body.pack(fill="both", expand=True)
             card = tk.Frame(body, bg=CARD, padx=48, pady=44,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             card.place(relx=0.5, rely=0.45, anchor="center")
             tk.Label(card, text="考试已暂停", bg=CARD, fg=ORANGE,
                      font=(FONT, 22, "bold")).pack(pady=(0, 10))
@@ -2805,13 +2811,13 @@ class App:
         multi = len(tasks) > 1
 
         def b(p):
-            top = tk.Frame(p, bg=GREEN, height=54)
+            top = tk.Frame(p, bg=_UI["mint"], height=54)
             top.pack(fill="x")
             top.pack_propagate(False)
             head = f"实操题 — {wps.LABEL.get(etype, etype)}"
             if multi:
                 head += f"   第 {idx + 1} / {len(tasks)} 道：{task.get('name', '')}"
-            tk.Label(top, text=head, bg=GREEN, fg="white",
+            tk.Label(top, text=head, bg=_UI["mint"], fg=INK,
                      font=(FONT, 14, "bold")).pack(side="left", padx=20)
             # 倒计时只放在顶部导航栏（self.time_label 在 build_exam 里创建），
             # 这里不再自建 —— 以前这里会覆盖掉导航栏时钟的引用，
@@ -2822,7 +2828,7 @@ class App:
 
             # 左：题号清单 + 底部「上/下一部分」（切题型，不是切这道实操题）
             side = tk.Frame(body, bg=CARD, width=230, padx=12, pady=12,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             side.pack(side="left", fill="y", padx=(0, 12))
             side.pack_propagate(False)
             # ⚠️ 底部按钮必须先 pack：先 pack 撑满的内容会把它们挤出可视区
@@ -2847,7 +2853,7 @@ class App:
             if next_key:
                 tk.Button(navbox, text=f"{labels.get(next_key, next_key)} ▶",
                           command=lambda k=next_key: self.switch_tab(k),
-                          bg=BLUE, fg="white", font=(FONT, 10, "bold"),
+                          bg=BLUE, fg=INK, font=(FONT, 10, "bold"),
                           relief="flat", cursor="hand2", padx=8, pady=6,
                           anchor="w", wraplength=196, justify="left",
                           activebackground=BLUE_D).pack(fill="x", pady=2)
@@ -2874,20 +2880,20 @@ class App:
 
             # 中：考试要求
             left = tk.Frame(body, bg=CARD, padx=20, pady=16,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             left.pack(side="left", fill="both", expand=True)
             tk.Label(left, text="考试要求", bg=CARD, fg=INK,
                      font=(FONT, 13, "bold")).pack(anchor="w")
             t = tk.Text(left, wrap="word", font=(FONT, 12),
                         bg=LINE_2, relief="flat", padx=12, pady=10,
-                        highlightbackground=LINE, highlightthickness=1)
+                        highlightbackground=LINE, highlightthickness=2)
             t.insert("1.0", task.get("requirement") or "（老师未填写要求）")
             t.config(state="disabled")
             t.pack(fill="both", expand=True, pady=10)
 
             # 右：操作区
             right = tk.Frame(body, bg=CARD, width=300, padx=18, pady=16,
-                             highlightbackground=LINE, highlightthickness=1)
+                             highlightbackground=LINE, highlightthickness=2)
             right.pack(side="right", fill="y", padx=(12, 0))
             right.pack_propagate(False)
 
@@ -2908,7 +2914,7 @@ class App:
                          wraplength=264, justify="left").pack(anchor="w")
 
             self.mat_box = tk.Listbox(right, height=4, font=(FONT, 10),
-                                      highlightbackground=LINE, highlightthickness=1)
+                                      highlightbackground=LINE, highlightthickness=2)
             self.mat_box.pack(fill="x", pady=(0, 4))
             for m in (task.get("materials") or []):
                 self.mat_box.insert("end", m)
@@ -2916,7 +2922,7 @@ class App:
                 self.mat_box.insert("end", "（这道题没有素材）")
 
             tk.Button(right, text="① 下载素材", command=self.do_download,
-                      bg=BLUE, fg="white", font=(FONT, 11, "bold"),
+                      bg=BLUE, fg=INK, font=(FONT, 11, "bold"),
                       relief="flat", pady=8, cursor="hand2",
                       activebackground=BLUE_D).pack(fill="x", pady=(0, 2))
             # 下载进度条：素材大时不至于"点了没反应"
@@ -3165,18 +3171,18 @@ class App:
         bar = tk.Frame(win, bg=BLUE, height=36)
         bar.pack(fill="x")
         bar.pack_propagate(False)
-        self._float_title = tk.Label(bar, text=f"题目：{name}", bg=BLUE, fg="white",
+        self._float_title = tk.Label(bar, text=f"题目：{name}", bg=BLUE, fg=INK,
                                      font=(FONT, 11, "bold"))
         self._float_title.pack(side="left", padx=10)
-        tk.Label(bar, text="按住蓝条可拖动", bg=BLUE, fg="#eff6ff",
+        tk.Label(bar, text="按住蓝条可拖动", bg=BLUE, fg=INK,
                  font=(FONT, 9)).pack(side="left")
 
         top_var = tk.BooleanVar(value=True)
         tk.Checkbutton(bar, text="置顶", variable=top_var,
                        command=lambda: win.attributes("-topmost",
                                                       bool(top_var.get())),
-                       bg=BLUE, fg="white", selectcolor=BLUE_D,
-                       activebackground=BLUE, activeforeground="white",
+                       bg=BLUE, fg=INK, selectcolor=BLUE_D,
+                       activebackground=BLUE, activeforeground=INK,
                        font=(FONT, 9),
                        highlightthickness=0).pack(side="right", padx=6)
 
@@ -3197,7 +3203,7 @@ class App:
         self._float_body = tk.Text(body, wrap="word", relief="flat",
                                    font=(FONT, self._float_size),
                                    bg=LINE_2, padx=12, pady=10,
-                                   highlightbackground=LINE, highlightthickness=1)
+                                   highlightbackground=LINE, highlightthickness=2)
         self._float_body.insert("1.0", text)
         self._float_body.config(state="disabled")
         self._float_body.pack(fill="both", expand=True)
@@ -3266,15 +3272,15 @@ class App:
     # ---------- 界面 4：结束 ----------
     def build_end(self):
         def b(p):
-            top = tk.Frame(p, bg=GRAY_D, height=56)
+            top = tk.Frame(p, bg=_UI["coral"], height=56)
             top.pack(fill="x")
             top.pack_propagate(False)
-            tk.Label(top, text="考试已结束", bg=GRAY_D, fg="white",
+            tk.Label(top, text="考试已结束", bg=_UI["coral"], fg=INK,
                      font=(FONT, 16, "bold")).pack(expand=True)
             body = tk.Frame(p, bg=BG)
             body.pack(fill="both", expand=True)
             card = tk.Frame(body, bg=CARD, padx=56, pady=52,
-                            highlightbackground=LINE, highlightthickness=1)
+                            highlightbackground=LINE, highlightthickness=2)
             card.place(relx=0.5, rely=0.45, anchor="center")
             tk.Label(card, text="考试已结束", bg=CARD, fg=INK,
                      font=(FONT, 22, "bold")).pack(pady=(0, 8))
@@ -3298,7 +3304,7 @@ class App:
             # 换考生：这台机器下一节课可能坐着别人，
             # 让他能在这里重新填姓名座位号，不用关掉程序再开
             tk.Button(card, text="重新登录（换考生）", command=self.back_to_login,
-                      bg=BLUE, fg="white", font=(FONT, 12, "bold"),
+                      bg=BLUE, fg=INK, font=(FONT, 12, "bold"),
                       padx=20, pady=8, relief="flat", cursor="hand2",
                       activebackground=BLUE_D).pack(pady=(26, 6))
             tk.Label(card, text="（下一场考试由老师在控制台点「开始考试」拉起）",

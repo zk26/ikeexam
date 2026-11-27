@@ -10,20 +10,22 @@ from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
 LIGHT = {
-    "bg": "#F5F7FA", "surface": "#FFFFFF", "surface_alt": "#EEF2F7",
-    "border": "#DCE3EC", "text": "#1F2937", "text_strong": "#0F172A",
-    "text_muted": "#6B7280", "text_on_accent": "#FFFFFF",
-    "primary": "#2563EB", "primary_hover": "#1D4ED8",
-    "primary_active": "#1E40AF", "primary_soft": "#DBEAFE",
-    "success": "#16A34A", "success_soft": "#F0FDF4",
-    "warning": "#F59E0B", "warning_soft": "#FFF7ED", "danger": "#DC2626",
-    "danger_soft": "#FEF2F2", "danger_border": "#FECACA",
-    "info": "#0EA5E9", "row_alt": "#F8FAFC", "heading": "#EDF2F9",
-    "heading_active": "#DCE7F5", "tab_bg": "#E9EFF7",
-    "tab_active": "#DBE7F6", "focus_ring": "#93C5FD",
-    "disabled_bg": "#F1F5F9", "disabled_fg": "#94A3B8",
-    "scroll_thumb": "#CBD5E1", "scroll_hover": "#94A3B8",
-    "arrow": "#64748B",
+    "bg": "#FCF8F2", "surface": "#FFFFFF", "surface_alt": "#FFF3E8",
+    "border": "#27324A", "text": "#27324A", "text_strong": "#1B2540",
+    "text_muted": "#5F6B7D", "text_on_accent": "#27324A",
+    "primary": "#20C46A", "primary_hover": "#159B52",
+    "primary_active": "#0F7F43", "primary_soft": "#E9FBF1",
+    "success": "#15803D", "success_soft": "#E9FBF1",
+    "warning": "#B7791F", "warning_soft": "#F1F9D8", "danger": "#C2414B",
+    "danger_soft": "#FFB4AA", "danger_border": "#27324A",
+    "info": "#0E7490", "info_soft": "#E6F7FB", "row_alt": "#FFF9EE",
+    "heading": "#E6E6FA", "heading_active": "#D9D5FA",
+    "tab_bg": "#F1F9D8", "tab_active": "#F6C945", "focus_ring": "#38BDF8",
+    "disabled_bg": "#E7E3DA", "disabled_fg": "#7A746B",
+    "scroll_thumb": "#8B7CF6", "scroll_hover": "#6D5DD3",
+    "arrow": "#27324A", "mint": "#E9FBF1", "sky": "#E6F7FB",
+    "coral": "#FFB4AA", "lemon": "#F1F9D8", "lavender": "#E6E6FA",
+    "yellow": "#F6C945", "purple": "#8B7CF6", "shadow": "#27324A",
 }
 DARK = {
     "bg": "#0F172A", "surface": "#1E293B", "surface_alt": "#263449",
@@ -39,13 +41,15 @@ DARK = {
     "tab_active": "#243247", "focus_ring": "#3B82F6",
     "disabled_bg": "#1A2536", "disabled_fg": "#64748B",
     "scroll_thumb": "#475569", "scroll_hover": "#64748B",
-    "arrow": "#94A3B8",
+    "arrow": "#94A3B8", "mint": "#163526", "sky": "#163247",
+    "coral": "#3B1F27", "lemon": "#3A2D18", "lavender": "#2E2952",
+    "yellow": "#FBBF24", "purple": "#A78BFA", "shadow": "#0F172A",
 }
 TOKENS = {"light": LIGHT, "dark": DARK}
 SPACING = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24, "xxl": 32}
 FONT_CANDIDATES = (
-    "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
-    "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", "微软雅黑", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
     "Source Han Sans SC", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
     "DejaVu Sans", "Arial",
 )
@@ -62,7 +66,7 @@ def pick_family(root=None):
     try:
         return tkfont.nametofont("TkDefaultFont").actual("family")
     except Exception:
-        return "DejaVu Sans"
+        return FONT_CANDIDATES[0] if sys.platform == "win32" else "DejaVu Sans"
 
 
 def build_fonts(root=None, base_size=10):
@@ -124,6 +128,89 @@ def maximize_window(win):
         pass
 
 
+def add_hard_shadow(widget, offset=6, color=None):
+    """为固定尺寸卡片添加 Memphis 硬边阴影。"""
+    color = color or getattr(widget, "_ui_tokens", LIGHT)["shadow"]
+    shadow = tk.Frame(widget.master, bg=color, bd=0)
+    widget.update_idletasks()
+    shadow.place(in_=widget, relx=0, rely=0, x=offset, y=offset, anchor="nw",
+                 width=widget.winfo_reqwidth(), height=widget.winfo_reqheight())
+    shadow.lower()
+    return shadow
+
+
+class MemphisBanner(tk.Canvas):
+    """奶油色几何横幅：太阳、波浪、圆点与硬阴影标题牌。"""
+
+    def __init__(self, master, title="", subtitle="", height=92, tokens=None, **kwargs):
+        self.tokens = tokens or getattr(master, "_ui_tokens", LIGHT)
+        super().__init__(master, height=height, bg=self.tokens["bg"],
+                         highlightthickness=0, bd=0, **kwargs)
+        self.title = title
+        self.subtitle = subtitle
+        family = pick_family(self)
+        self._title_font = tkfont.Font(root=self, family=family, size=-20,
+                                       weight="bold")
+        self._sub_font = tkfont.Font(root=self, family=family, size=-11)
+        self.bind("<Configure>", lambda event: self._draw())
+
+    @staticmethod
+    def _octagon(x1, y1, x2, y2, cut=12):
+        return [
+            x1 + cut, y1, x2 - cut, y1, x2, y1 + cut,
+            x2, y2 - cut, x2 - cut, y2, x1 + cut, y2,
+            x1, y2 - cut, x1, y1 + cut,
+        ]
+
+    def _draw(self):
+        self.delete("all")
+        tokens = self.tokens
+        width = max(self.winfo_width(), 360)
+        height = max(self.winfo_height(), 72)
+        plaque_width = min(max(300, self._title_font.measure(self.title) + 48),
+                           max(260, width - 190))
+        x, y = 22, 12
+        plaque_height = height - 24
+        self.create_polygon(self._octagon(x + 5, y + 5, x + plaque_width + 5,
+                                           y + plaque_height + 5),
+                            fill=tokens["shadow"], outline=tokens["shadow"])
+        self.create_polygon(self._octagon(x, y, x + plaque_width,
+                                           y + plaque_height),
+                            fill=tokens["lavender"], outline=tokens["border"],
+                            width=2)
+        if self.title:
+            self.create_text(x + 18, y + plaque_height / 2 - 8,
+                             text=self.title, anchor="w", fill=tokens["text_strong"],
+                             font=self._title_font)
+        if self.subtitle:
+            self.create_text(x + 18, y + plaque_height / 2 + 17,
+                             text=self.subtitle, anchor="w", fill=tokens["text_muted"],
+                             font=self._sub_font)
+
+        sun_x, sun_y = width - 72, 28
+        self.create_oval(sun_x - 17, sun_y - 17, sun_x + 17, sun_y + 17,
+                         fill=tokens["yellow"], outline=tokens["border"], width=2)
+        for dx, dy in ((0, -27), (0, 27), (-27, 0), (27, 0),
+                       (-19, -19), (19, -19), (-19, 19), (19, 19)):
+            self.create_line(sun_x + dx * .72, sun_y + dy * .72,
+                             sun_x + dx, sun_y + dy, fill=tokens["border"], width=2)
+        points = []
+        for index in range(9):
+            px = width - 176 + index * 15
+            py = height - 24 + (6 if index % 2 else -6)
+            points.extend((px, py))
+        self.create_line(*points, fill=tokens["coral"], width=5,
+                         smooth=True, splinesteps=24)
+        self.create_polygon(width - 176, 18, width - 150, 52, width - 126, 18,
+                            fill=tokens["sky"], outline=tokens["border"], width=2)
+        for row in range(3):
+            for column in range(3):
+                cx = width - 116 + column * 14
+                cy = 66 + row * 10
+                self.create_oval(cx - 2, cy - 2, cx + 2, cy + 2,
+                                 fill=tokens["purple"], outline=tokens["purple"])
+
+
 def apply_theme(root, mode="light"):
     tokens = TOKENS[mode]
     fonts = build_fonts(root)
@@ -138,7 +225,12 @@ def apply_theme(root, mode="light"):
     style.configure("TFrame", background=tokens["bg"])
     style.configure("Surface.TFrame", background=tokens["surface"])
     style.configure("Card.TFrame", background=tokens["surface"], relief="solid",
-                    borderwidth=1, bordercolor=tokens["border"])
+                    borderwidth=2, bordercolor=tokens["border"])
+    for name, color in (("Mint", tokens["mint"]), ("Sky", tokens["sky"]),
+                        ("Coral", tokens["coral"]), ("Lemon", tokens["lemon"]),
+                        ("Lavender", tokens["lavender"])):
+        style.configure(f"{name}.TFrame", background=color, relief="solid",
+                        borderwidth=2, bordercolor=tokens["border"])
     style.configure("TLabel", background=tokens["surface"], foreground=tokens["text"],
                     font=body, padding=0)
     style.configure("OnBg.TLabel", background=tokens["bg"], foreground=tokens["text"])
@@ -146,51 +238,55 @@ def apply_theme(root, mode="light"):
     style.configure("Subtitle.TLabel", foreground=tokens["text_strong"], font=sub)
     style.configure("Title.TLabel", foreground=tokens["text_strong"], font=title)
     style.configure("H1.TLabel", foreground=tokens["text_strong"], font=h1)
+    style.configure("Plaque.TLabel", background=tokens["lavender"],
+                    foreground=tokens["text_strong"], font=sub, padding=(16, 10),
+                    relief="solid", borderwidth=2, bordercolor=tokens["border"])
     style.configure("Success.TLabel", foreground=tokens["success"])
     style.configure("Danger.TLabel", foreground=tokens["danger"])
     style.configure("Info.TLabel", foreground=tokens["info"])
 
-    style.configure("Choice.TCheckbutton", relief="flat", borderwidth=1,
-                    padding=(12, 8), font=body, background=tokens["surface"],
+    style.configure("Choice.TCheckbutton", relief="solid", borderwidth=2,
+                    padding=(12, 8), font=bold, background=tokens["surface"],
                     foreground=tokens["text"], bordercolor=tokens["border"])
     style.map("Choice.TCheckbutton",
-              background=[("selected", tokens["primary_soft"]),
-                          ("active", tokens["primary_soft"]),
+              background=[("selected", tokens["mint"]),
+                          ("active", tokens["lemon"]),
                           ("disabled", tokens["disabled_bg"])],
-              foreground=[("selected", tokens["primary"]),
+              foreground=[("selected", tokens["text_strong"]),
                           ("disabled", tokens["disabled_fg"])],
               bordercolor=[("selected", tokens["primary"]),
-                           ("active", tokens["primary"])])
-    style.configure("TButton", relief="flat", borderwidth=0, padding=(14, 8),
+                           ("active", tokens["border"])])
+    style.configure("TButton", relief="solid", borderwidth=2, padding=(14, 8),
                     anchor="center", background=tokens["surface"],
-                    foreground=tokens["text"], bordercolor=tokens["border"], font=body)
+                    foreground=tokens["text"], bordercolor=tokens["border"], font=bold)
     style.map("TButton",
-              background=[("pressed", tokens["surface_alt"]),
-                          ("active", tokens["surface_alt"]),
+              background=[("pressed", tokens["lemon"]),
+                          ("active", tokens["sky"]),
                           ("disabled", tokens["disabled_bg"])],
               foreground=[("disabled", tokens["disabled_fg"])],
               bordercolor=[("focus", tokens["focus_ring"])])
-    style.configure("Accent.TButton", relief="flat", borderwidth=0,
+    style.configure("Accent.TButton", relief="solid", borderwidth=2,
                     padding=(16, 9), background=tokens["primary"],
-                    foreground=tokens["text_on_accent"], font=bold)
+                    foreground=tokens["text_on_accent"], font=bold,
+                    bordercolor=tokens["border"])
     style.map("Accent.TButton",
               background=[("pressed", tokens["primary_active"]),
                           ("active", tokens["primary_hover"]),
-                          ("disabled", tokens["scroll_thumb"])],
-              foreground=[("disabled", tokens["surface"])])
-    style.configure("Danger.TButton", relief="flat", borderwidth=0,
+                          ("disabled", tokens["disabled_bg"])],
+              foreground=[("disabled", tokens["disabled_fg"])])
+    style.configure("Danger.TButton", relief="solid", borderwidth=2,
                     padding=(14, 8), background=tokens["danger_soft"],
-                    foreground=tokens["danger"], bordercolor=tokens["danger_border"])
+                    foreground=tokens["text_strong"], bordercolor=tokens["border"])
     style.map("Danger.TButton",
               background=[("pressed", tokens["danger"]),
-                          ("active", tokens["danger_border"])],
-              foreground=[("pressed", tokens["text_on_accent"])])
-    style.configure("Ghost.TButton", relief="flat", borderwidth=0,
-                    padding=(10, 5), background=tokens["bg"],
-                    foreground=tokens["primary"], font=body)
+                          ("active", tokens["coral"])],
+              foreground=[("pressed", "#FFFFFF")])
+    style.configure("Ghost.TButton", relief="solid", borderwidth=2,
+                    padding=(10, 5), background=tokens["surface"],
+                    foreground=tokens["text"], font=bold, bordercolor=tokens["border"])
     style.map("Ghost.TButton",
-              background=[("pressed", tokens["primary_soft"]),
-                          ("active", tokens["primary_soft"])])
+              background=[("pressed", tokens["lavender"]),
+                          ("active", tokens["sky"])])
     style.configure("Toolbutton", relief="flat", borderwidth=0, padding=(10, 6),
                     background=tokens["bg"], foreground=tokens["text"])
     style.map("Toolbutton",
@@ -201,7 +297,7 @@ def apply_theme(root, mode="light"):
     style.configure("TEntry", fieldbackground=tokens["surface"],
                     foreground=tokens["text"], bordercolor=tokens["border"],
                     lightcolor=tokens["border"], darkcolor=tokens["border"],
-                    borderwidth=1, relief="flat", padding=(10, 8), insertwidth=2)
+                    borderwidth=2, relief="solid", padding=(10, 8), insertwidth=2)
     style.map("TEntry",
               bordercolor=[("focus", tokens["primary"]),
                            ("invalid", tokens["danger"]),
@@ -217,6 +313,7 @@ def apply_theme(root, mode="light"):
     style.configure("TSpinbox", fieldbackground=tokens["surface"],
                     foreground=tokens["text"], bordercolor=tokens["border"],
                     lightcolor=tokens["border"], darkcolor=tokens["border"],
+                    borderwidth=2, relief="solid",
                     arrowcolor=tokens["arrow"], arrowsize=13, padding=(10, 8))
     style.map("TSpinbox", bordercolor=[("focus", tokens["primary"])],
               arrowcolor=[("active", tokens["primary"]),
@@ -224,6 +321,7 @@ def apply_theme(root, mode="light"):
     style.configure("TCombobox", fieldbackground=tokens["surface"],
                     foreground=tokens["text"], bordercolor=tokens["border"],
                     lightcolor=tokens["border"], darkcolor=tokens["border"],
+                    borderwidth=2, relief="solid",
                     arrowcolor=tokens["arrow"], arrowsize=13, padding=(10, 8))
     style.map("TCombobox", bordercolor=[("focus", tokens["primary"])],
               fieldbackground=[("readonly", tokens["surface"]),
@@ -246,18 +344,18 @@ def apply_theme(root, mode="light"):
     ]
     for tab_style in ("TNotebook.Tab", "Main.TNotebook.Tab"):
         style.configure(tab_style, background=tokens["tab_bg"],
-                        foreground=tokens["text_muted"], padding=(22, 10),
-                        font=body, borderwidth=0, bordercolor=tokens["tab_bg"],
-                        lightcolor=tokens["tab_bg"], darkcolor=tokens["tab_bg"])
+                        foreground=tokens["text"], padding=(16, 9),
+                        font=bold, borderwidth=2, bordercolor=tokens["border"],
+                        lightcolor=tokens["border"], darkcolor=tokens["border"])
         style.map(tab_style,
-                  background=[("selected", tokens["surface"]),
-                              ("active", tokens["tab_active"]),
-                              ("disabled", tokens["bg"])],
-                  foreground=[("selected", tokens["primary"]),
+                  background=[("selected", tokens["mint"]),
+                              ("active", tokens["lemon"]),
+                              ("disabled", tokens["disabled_bg"])],
+                  foreground=[("selected", tokens["text_strong"]),
                               ("active", tokens["text"]),
                               ("disabled", tokens["disabled_fg"])],
-                  bordercolor=[("selected", tokens["surface"]),
-                               ("active", tokens["tab_active"])],
+                  bordercolor=[("selected", tokens["primary"]),
+                               ("active", tokens["border"])],
                   expand=[("selected", (1, 1, 1, 0))])
         try:
             style.layout(tab_style, tab_layout)
@@ -267,9 +365,9 @@ def apply_theme(root, mode="light"):
     for tv in ("Treeview", "Data.Treeview"):
         style.configure(tv, background=tokens["surface"],
                         fieldbackground=tokens["surface"], foreground=tokens["text"],
-                        rowheight=32, bordercolor=tokens["border"], borderwidth=0,
+                        rowheight=36, bordercolor=tokens["border"], borderwidth=1,
                         font=body)
-        style.map(tv, background=[("selected", tokens["primary_soft"])],
+        style.map(tv, background=[("selected", tokens["mint"])],
                   foreground=[("selected", tokens["text_strong"])])
     for hd in ("Treeview.Heading", "Data.Treeview.Heading"):
         style.configure(hd, background=tokens["heading"],
@@ -308,7 +406,7 @@ def apply_theme(root, mode="light"):
                   foreground=[("disabled", tokens["disabled_fg"])])
     for name in ("TLabelframe", "Card.TLabelframe"):
         style.configure(name, background=tokens["surface"],
-                        bordercolor=tokens["border"], borderwidth=1,
+                        bordercolor=tokens["border"], borderwidth=2,
                         labelmargins=(12, 2, 12, 4))
     for name in ("TLabelframe.Label", "Card.TLabelframe.Label"):
         style.configure(name, background=tokens["surface"],
@@ -406,15 +504,15 @@ def apply_to_tk(root, tokens=None):
                     safe(child, bg=tokens["surface"], fg=tokens["text"],
                          activebackground=tokens["surface_alt"],
                          activeforeground=tokens["text"])
-                safe(child, relief="flat", bd=0, highlightthickness=0,
-                     font=fonts["body"], padx=12, pady=6, cursor="hand2")
+                safe(child, relief="solid", bd=2, highlightthickness=0,
+                     font=fonts["body"], padx=12, pady=7, cursor="hand2")
             elif cls in ("Entry", "Spinbox"):
                 safe(child, bg=tokens["surface"], fg=tokens["text"],
                      insertbackground=tokens["text"],
                      selectbackground=tokens["primary_soft"],
                      selectforeground=tokens["text_strong"],
-                     highlightthickness=1, highlightbackground=tokens["border"],
-                     highlightcolor=tokens["primary"], relief="flat", bd=0,
+                     highlightthickness=0, highlightbackground=tokens["border"],
+                     highlightcolor=tokens["primary"], relief="solid", bd=2,
                      font=fonts["body"])
             elif cls in ("Text", "Listbox"):
                 try:
@@ -427,8 +525,8 @@ def apply_to_tk(root, tokens=None):
                          insertbackground=tokens["text"],
                          selectbackground=tokens["primary_soft"],
                          selectforeground=tokens["text_strong"],
-                         highlightthickness=1, highlightbackground=tokens["border"],
-                         relief="flat", bd=0, font=fonts["body"])
+                         highlightthickness=0, highlightbackground=tokens["border"],
+                         relief="solid", bd=2, font=fonts["body"])
                 else:
                     safe(child, highlightthickness=0, relief="flat", bd=0)
             elif cls == "Canvas":

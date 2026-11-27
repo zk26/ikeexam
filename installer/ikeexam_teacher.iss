@@ -11,7 +11,7 @@
 ; ============================================================
 
 #define MyAppName "ikee考务中心（老师端）"
-#define MyAppVersion "2.0.1"
+#define MyAppVersion "2.1.1"
 #define MyAppPublisher "小可"
 #define MyAppURL "https://www.ikee002.top/"
 #define MyAppExeName "pythonw.exe"

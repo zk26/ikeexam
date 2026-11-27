@@ -574,12 +574,16 @@ class LoginWindow:
         self.root.minsize(680, 520)
         ui_theme.maximize_window(self.root)
         self.root.configure(bg=BG)
+        banner = ui_theme.MemphisBanner(
+            self.root, title=APP_NAME, subtitle="让考试多一点阳光", height=96,
+            tokens=getattr(self.app, "ui_tokens", _UI))
+        banner.pack(fill="x")
 
-        card = tk.Frame(self.root, bg=CARD, padx=56, pady=48,
-                        highlightbackground=LINE, highlightthickness=1)
-        card.place(relx=0.5, rely=0.5, anchor="center")
-        tk.Label(card, text=APP_NAME, bg=CARD, font=(FONT, 24, "bold"),
-                 fg=INK).pack(pady=(0, 22))
+        card = tk.Frame(self.root, bg=CARD, padx=48, pady=34,
+                        highlightbackground=LINE, highlightthickness=2)
+        card.place(relx=0.5, rely=0.56, anchor="center")
+        tk.Label(card, text="老师端登录", bg=CARD, font=(FONT, 20, "bold"),
+                 fg=INK).pack(pady=(0, 18))
 
         tk.Label(card, text="服务器地址", bg=CARD, fg=INK,
                  font=(FONT, 11)).pack(anchor="w")
@@ -616,6 +620,7 @@ class LoginWindow:
         self.e_pwd.bind("<Return>", lambda event: self._connect())
         self.e_server.bind("<Return>", lambda event: self._connect())
         self.e_server.bind("<FocusOut>", lambda event: self.app._schedule_login_startup())
+        ui_theme.add_hard_shadow(card, 6, LINE)
         self.signature = signature_label(self.root, BG)
         self.signature.pack(side="bottom", anchor="e", padx=12, pady=5)
         self.signature.lift()
@@ -729,34 +734,39 @@ class MainWindow:
         ui_theme.maximize_window(self.root)
         self.root.configure(bg=BG)
 
-        top = tk.Frame(self.root, bg=BLUE)
+        banner = ui_theme.MemphisBanner(
+            self.root, title=APP_NAME, subtitle="老师端 · 考务控制台", height=82,
+            tokens=getattr(self.app, "ui_tokens", _UI))
+        banner.pack(fill="x")
+
+        top = tk.Frame(self.root, bg=_UI["mint"], highlightbackground=LINE,
+                       highlightthickness=2)
         top.pack(fill="x")
-        tk.Label(top, text=APP_NAME, bg=BLUE, fg="white",
-                 font=(FONT, 15, "bold")).pack(side="left", padx=16, pady=9)
         self.server_label = tk.Label(
-            top, text="", bg=BLUE, fg=BLUE_L, font=(FONT, 9))
-        self.server_label.pack(side="left", padx=8)
+            top, text="", bg=_UI["mint"], fg=INK, font=(FONT, 9, "bold"))
+        self.server_label.pack(side="left", padx=14, pady=6)
         try:
             host = urlsplit(self.api.base).netloc or self.api.base
         except Exception:
             host = self.api.base
         self.server_label.configure(text=f"已连接 · {host}")
-        bar = tk.Frame(top, bg=BLUE)
+        bar = tk.Frame(top, bg=_UI["mint"])
         bar.pack(side="right", padx=8)
         self.about_btn = tk.Button(
-            bar, text="关于", command=lambda: show_about(self.root), bg=BLUE,
-            fg="white", font=(FONT, 9), relief="flat", cursor="hand2",
-            activebackground=BLUE_D)
+            bar, text="关于", command=lambda: show_about(self.root),
+            bg=_UI["lavender"], fg=INK, font=(FONT, 9, "bold"),
+            relief="solid", bd=2, cursor="hand2",
+            activebackground=_UI["yellow"])
         self.about_btn.pack(side="left", padx=2)
         self.logout_btn = tk.Button(
-            bar, text="退出登录", command=self.logout, bg=BLUE, fg="white",
-            font=(FONT, 9), relief="flat", cursor="hand2",
-            activebackground=BLUE_D)
+            bar, text="退出登录", command=self.logout, bg=_UI["coral"], fg=INK,
+            font=(FONT, 9, "bold"), relief="solid", bd=2, cursor="hand2",
+            activebackground=_UI["yellow"])
         self.logout_btn.pack(side="left", padx=2)
 
         self.notebook = ttk.Notebook(self.root, style="Main.TNotebook")
         self.notebook.enable_traversal()
-        self.notebook.pack(fill="both", expand=True, padx=12, pady=(12, 6))
+        self.notebook.pack(fill="both", expand=True, padx=16, pady=(14, 8))
         self.exam_page = ExamManager(self)
         self.question_page = QuestionBank(self)
         self.practice_page = PracticeBank(self)
@@ -769,7 +779,7 @@ class MainWindow:
         self.notebook.add(self.student_page, text="学生机")
 
         bottom = tk.Frame(self.root, bg=CARD, highlightbackground=LINE,
-                          highlightthickness=1)
+                          highlightthickness=2)
         bottom.pack(fill="x", side="bottom")
         self.status = tk.Label(bottom, text="就绪", anchor="w", bg=CARD,
                                fg=GRAY, font=(FONT, 9), padx=12, pady=6)
@@ -915,7 +925,7 @@ class ExamManager(PageBase):
     def _build(self):
         info = ttk.Frame(self)
         info.grid(row=0, column=0, sticky="ew", pady=(2, 6))
-        ttk.Label(info, text="考试列表", font=(FONT, 14, "bold")).pack(
+        ttk.Label(info, text="考试列表", style="Plaque.TLabel").pack(
             side="left")
         self.summary = ttk.Label(info, text="", style="Muted.TLabel")
         self.summary.pack(side="right")
@@ -1406,7 +1416,7 @@ class ExamEditor:
         header = ttk.Frame(outer)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         self.title_label = ttk.Label(header, text="考试配置",
-                                     font=(FONT, 13, "bold"))
+                                     style="Plaque.TLabel")
         self.title_label.pack(side="left")
         self.tip = ttk.Label(header, text="正在加载考试配置…",
                              style="Muted.TLabel")
@@ -1415,16 +1425,16 @@ class ExamEditor:
         notebook_style.configure("Exam.TNotebook", background=BG,
                                  bordercolor=LINE, borderwidth=0)
         notebook_style.configure(
-            "Exam.TNotebook.Tab", background=_UI["tab_bg"], foreground=GRAY,
-            padding=(10, 8), font=(FONT, 9), borderwidth=0,
-            bordercolor=_UI["tab_bg"], lightcolor=_UI["tab_bg"],
-            darkcolor=_UI["tab_bg"])
+            "Exam.TNotebook.Tab", background=_UI["lemon"], foreground=INK,
+            padding=(14, 9), font=(FONT, 9, "bold"), borderwidth=2,
+            bordercolor=LINE, lightcolor=LINE, darkcolor=LINE)
         notebook_style.map(
             "Exam.TNotebook.Tab",
-            background=[("selected", CARD), ("active", _UI["tab_active"]),
+            background=[("selected", _UI["mint"]), ("active", _UI["yellow"]),
                         ("disabled", BG)],
-            foreground=[("selected", BLUE), ("active", INK),
-                        ("disabled", _UI["disabled_fg"])])
+            foreground=[("selected", INK), ("active", INK),
+                        ("disabled", _UI["disabled_fg"])],
+            bordercolor=[("selected", GREEN), ("active", LINE)])
         self.notebook = ttk.Notebook(outer, style="Exam.TNotebook")
         self.notebook.enable_traversal()
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -2700,8 +2710,8 @@ class QuestionEditor:
         self.top = tk.Toplevel(self.main.root)
         self.top.title("编辑理论题" if question else "新增理论题")
         self.top.transient(self.main.root)
-        self.top.geometry("920x760")
-        self.top.minsize(840, 680)
+        self.top.geometry("900x680")
+        self.top.minsize(840, 620)
         self.top.configure(bg=BG)
         icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.ico")
         if os.path.isfile(icon):
@@ -3419,7 +3429,7 @@ class ScoresWindow:
         title = ttk.Frame(outer)
         title.grid(row=0, column=0, sticky="ew")
         ttk.Label(title, text=self.exam.get("title") or "考试成绩",
-                  font=(FONT, 14, "bold")).pack(side="left")
+                  style="Plaque.TLabel").pack(side="left")
         self.tip = ttk.Label(title, text="正在加载成绩…", style="Muted.TLabel")
         self.tip.pack(side="right")
         self.summary = ttk.Label(outer, text="", style="Muted.TLabel")
