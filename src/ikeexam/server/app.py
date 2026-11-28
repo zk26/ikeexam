@@ -2,12 +2,12 @@
 ikee考务中心 —— 服务端
 两阶段流程：理论题 → 实操题（自动拉起 WPS）
 """
+import atexit
 import csv
 import io
 import ipaddress
 import json
 import os
-import queue as _queue
 import re
 import secrets
 import sys
@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import (Flask, request, jsonify, render_template, send_file,
                    redirect, url_for, flash, session)
@@ -35,6 +36,7 @@ ROOT = BASE
 sys.path.insert(0, BASE)
 sys.path.insert(0, SRC_DIR)
 from ikeexam.shared.config_schema import RULE_TYPES
+from ikeexam.shared.security import material_name
 
 # 打包成 EXE 后路径规则不同（只读资源在解包目录、可写数据在 exe 旁边）：
 # 见 runtime.py 的说明。必须在 import db / auth 之前准备好，它们顶层会读环境变量。
@@ -64,13 +66,19 @@ app = Flask(__name__, template_folder=runtime.TEMPLATE_DIR,
             static_folder=runtime.STATIC_DIR)
 
 
+def _spreadsheet_value(value):
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 def _safe_name(name, fallback=""):
     """
     净化文件/目录名：去掉路径分隔符和通配符，防 '../' 穿越。
     fallback 用于空值兜底（如班级没填 → 未分班）。
     """
     s = "".join(ch for ch in str(name or "")
-                if ch not in r'\/:*?"<>|' and ch >= " ")
+                if ch not in r'\/:*?"<>|' and ord(ch) > 31 and ord(ch) != 127)
     return s.strip().strip(".") or fallback
 
 
@@ -85,16 +93,20 @@ def _valid_office_upload(upload):
     stream = upload.stream
     pos = 0
     try:
+        from ikeexam.graders.base import validate_ooxml
+    except ImportError:
+        from graders.base import validate_ooxml
+    try:
         pos = stream.tell()
         if not zipfile.is_zipfile(stream):
             return False
         stream.seek(pos)
         with zipfile.ZipFile(stream) as z:
-            names = set(z.namelist())
-            if required[ext] not in names or "[Content_Types].xml" not in names:
-                return False
-            total = sum(info.file_size for info in z.infolist())
-            return total <= 500 * 1024 * 1024
+            validate_ooxml(z)
+        names = set(z.namelist())
+        if required[ext] not in names or "[Content_Types].xml" not in names:
+            return False
+        return True
     except Exception:
         return False
     finally:
@@ -173,6 +185,15 @@ ADMIN_SESSION_SECONDS = 24 * 3600
 FINAL_SUBMIT_GRACE_SECONDS = 5 * 60
 app.permanent_session_lifetime = ADMIN_SESSION_SECONDS
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024   # 单文件 100MB
+QUESTION_IMPORT_MAX_BYTES = 16 * 1024 * 1024
+QUESTION_IMPORT_MAX_ITEMS = 10000
+QUESTION_IMPORT_MAX_FIELD_BYTES = 128 * 1024
+QUESTION_IMPORT_MAX_OPTIONS = 256
+QUESTION_IMPORT_MAX_TEXT_BYTES = 16 * 1024 * 1024
+
+
+class QuestionImportBudgetError(ValueError):
+    pass
 # 会话 Cookie 加固：SameSite=Lax 可拦下大多数跨站 POST（配合下面的 CSRF token）
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -189,6 +210,16 @@ HTTP_PORT = int(os.environ.get("EXAM_HTTP_PORT", "9000"))
 
 # 广播对象，启动时填充
 beacon_obj = None
+_artifact_write_lock = threading.RLock()
+_material_lock = threading.RLock()
+
+
+def _material_locked(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        with _material_lock:
+            return view(*args, **kwargs)
+    return wrapped
 
 
 def _csrf_token():
@@ -305,7 +336,8 @@ def _student_auth(d=None):
 def _student_write_allowed(ex):
     """考试进行中可写；老师收卷后给客户端 5 分钟完成最终上传。"""
     if ex.get("status") in ("running", "paused"):
-        return True
+        remaining = db.phase_remaining(ex["id"], include_paused=True)
+        return remaining is not None and remaining > 0
     if ex.get("status") != "stopped":
         return False
     try:
@@ -347,9 +379,27 @@ def _admin_session_active():
     if session.get("auth_at") != auth.updated_at():
         return False
     try:
-        return time.time() < float(session.get("at", 0)) + ADMIN_SESSION_SECONDS
+        if time.time() >= float(session.get("at", 0)) + ADMIN_SESSION_SECONDS:
+            return False
     except (TypeError, ValueError):
         return False
+    return db.admin_session_active(session.get("sid"), time.time())
+
+
+def _start_admin_session():
+    now = int(time.time())
+    sid = secrets.token_urlsafe(32)
+    db.revoke_admin_session(session.get("sid"))
+    db.create_admin_session(sid, now, now + ADMIN_SESSION_SECONDS)
+    session.permanent = True
+    session["admin"] = True
+    session["at"] = now
+    session["auth_at"] = auth.updated_at()
+    session["sid"] = sid
+
+
+def _revoke_current_admin_session():
+    db.revoke_admin_session(session.get("sid"))
 
 
 @app.before_request
@@ -408,9 +458,45 @@ def _safe_next(target):
     return "/"
 
 
+def _loopback_host(value):
+    value = str(value or "").strip().lower()
+    if not value or any(ch in value for ch in "@/\\") or any(ch.isspace() for ch in value):
+        return False
+    if value.startswith("["):
+        end = value.find("]")
+        if end < 0:
+            return False
+        host = value[1:end]
+    else:
+        host = value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _setup_allowed():
-    return (request.remote_addr in ("127.0.0.1", "::1")
-            or os.environ.get("EXAM_ALLOW_REMOTE_SETUP") == "1")
+    if os.environ.get("EXAM_ALLOW_REMOTE_SETUP") == "1":
+        return True
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return False
+    if any(request.headers.get(name) for name in
+           ("Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto")):
+        return False
+    if not _loopback_host(request.host):
+        return False
+    origin = request.headers.get("Origin")
+    if origin:
+        try:
+            parsed = urlsplit(origin)
+            if (parsed.scheme not in ("http", "https") or parsed.username
+                    or parsed.password or not _loopback_host(parsed.netloc)):
+                return False
+        except ValueError:
+            return False
+    return True
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -428,10 +514,7 @@ def login():
         pwd = (request.form.get("password") or "").strip()
         if auth.verify(pwd):
             auth.note_ok()
-            session.permanent = True
-            session["admin"] = True
-            session["at"] = int(time.time())
-            session["auth_at"] = auth.updated_at()
+            _start_admin_session()
             flash("登录成功")
             return redirect(_safe_next(request.args.get("next")) or url_for("index"))
         # 失败
@@ -467,6 +550,7 @@ def setup():
 
 @app.route("/logout", methods=["POST"])
 def logout():
+    _revoke_current_admin_session()
     session.clear()
     return redirect(url_for("login"))
 
@@ -485,6 +569,7 @@ def settings():
         if new != new2:
             return render_template("settings.html", err="两次输入的新密码不一致")
         auth.set_password(new)
+        _revoke_current_admin_session()
         session.clear()
         flash("密码已修改，请重新登录")
         return redirect(url_for("index"))
@@ -492,50 +577,118 @@ def settings():
 
 
 # ==================== 后台评分队列 ====================
-#
-# 50 人一起交卷时，如果在上传请求里同步评分（解析 docx/xlsx 要 0.3~1 秒），
-# 请求线程会被占满，学生端表现为"点了提交半天没反应"。
-# 改成：上传落盘 + 建记录就立刻返回，评分丢给后台线程排队做。
-_grade_q = _queue.Queue()
+_grade_wake = threading.Event()
+_grade_stop = threading.Event()
+_grade_threads = []
+_grade_supervisor_thread = None
+_grade_start_lock = threading.Lock()
+_grade_lease_seconds = 120
 
 
-def _do_grade(sub_id, path, checks, host):
-    try:
-        total, full, detail = exm.grade_file(path, checks)
-        db.update_score(sub_id, total, full, detail)
-        errs = [d for d in detail if d.get("error")]
-        if errs:
-            db.log(host, "warn",
-                   f"自动评分完成 {total}/{full}，但 {len(errs)} 个评分点执行失败，需人工复核")
-        else:
-            db.log(host, "info", f"自动评分完成 {total}/{full}")
-    except Exception as e:
-        db.log(host, "error", f"自动评分失败: {e}")
+def _do_grade(job):
+    payload = job.get("input") or {}
+    total, full, detail = exm.grade_file(payload["path"], payload.get("checks") or [])
+    if not db.complete_grading_job(job["id"], job["lease_token"],
+                                   job["lease_owner"], total, full, detail):
+        raise RuntimeError("评分租约已失效，结果未写入")
+    errs = [d for d in detail if d.get("error")]
+    if errs:
+        db.log(job.get("hostname", ""), "warn",
+               f"自动评分完成 {total}/{full}，但 {len(errs)} 个评分点执行失败，需人工复核")
+    else:
+        db.log(job.get("hostname", ""), "info", f"自动评分完成 {total}/{full}")
 
 
-def _grade_worker():
-    while True:
-        item = _grade_q.get()
-        if item is None:
-            continue
+def _grade_worker(worker_id):
+    while not _grade_stop.is_set():
         try:
-            _do_grade(*item)
-        except Exception as e:
-            # _do_grade 内部已 try/except 记日志；这里兜底防止记日志本身抛异常
-            db.log(item[3] if item else "", "error", f"评分线程异常: {e}")
+            job = db.claim_grading_job(worker_id, _grade_lease_seconds)
+        except Exception:
+            app.logger.exception("领取评分任务失败")
+            _grade_wake.wait(1)
+            _grade_wake.clear()
+            continue
+        if not job:
+            _grade_wake.wait(0.5)
+            _grade_wake.clear()
+            continue
+        heartbeat_stop = threading.Event()
+
+        def heartbeat():
+            while not heartbeat_stop.wait(_grade_lease_seconds / 3):
+                try:
+                    db.heartbeat_grading_job(job["id"], job["lease_token"],
+                                             worker_id, _grade_lease_seconds)
+                except Exception:
+                    app.logger.exception("评分任务续租失败")
+
+        hb = threading.Thread(target=heartbeat, daemon=True,
+                              name=f"grade-heartbeat-{worker_id}")
+        hb.start()
+        try:
+            _do_grade(job)
+        except Exception as exc:
+            try:
+                db.fail_grading_job(job["id"], job["lease_token"],
+                                    worker_id, str(exc))
+                db.log(job.get("hostname", ""), "error", f"自动评分失败: {exc}")
+            except Exception:
+                app.logger.exception("记录评分失败状态时发生异常")
         finally:
-            _grade_q.task_done()
+            heartbeat_stop.set()
+            hb.join(2)
 
 
-def enqueue_grade(sub_id, path, checks, host):
-    """把一次评分丢进后台队列，返回排队位置"""
-    _grade_q.put((sub_id, path, list(checks or []), host))
-    return _grade_q.qsize()
+def _grade_supervisor():
+    while not _grade_stop.wait(5):
+        for index, thread in enumerate(list(_grade_threads)):
+            if thread.is_alive():
+                continue
+            worker_id = f"grade-{index}-{uuid.uuid4().hex[:8]}"
+            replacement = threading.Thread(target=_grade_worker, args=(worker_id,),
+                                           daemon=True, name=worker_id)
+            _grade_threads[index] = replacement
+            replacement.start()
 
 
-# 2 个评分线程：评分是 CPU 活（受 GIL 限制），开太多反而互相抢
-for _i in range(2):
-    threading.Thread(target=_grade_worker, daemon=True).start()
+def _start_grading_workers():
+    global _grade_supervisor_thread
+    with _grade_start_lock:
+        if _grade_threads and any(t.is_alive() for t in _grade_threads):
+            return
+        _grade_stop.clear()
+        _grade_threads[:] = []
+        for index in range(2):
+            worker_id = f"grade-{index}-{uuid.uuid4().hex[:8]}"
+            thread = threading.Thread(target=_grade_worker, args=(worker_id,),
+                                      daemon=True, name=worker_id)
+            _grade_threads.append(thread)
+            thread.start()
+        _grade_supervisor_thread = threading.Thread(
+            target=_grade_supervisor, daemon=True, name="grade-supervisor")
+        _grade_supervisor_thread.start()
+        atexit.register(_stop_grading_workers)
+
+
+def _stop_grading_workers():
+    _grade_stop.set()
+    _grade_wake.set()
+    for thread in list(_grade_threads):
+        thread.join(10)
+    if _grade_supervisor_thread:
+        _grade_supervisor_thread.join(2)
+
+
+def enqueue_grade(sub_id, path, checks, host, exam_id, purpose="submit"):
+    """把一次评分持久化到后台队列，返回排队位置。"""
+    key = f"{purpose}:{sub_id}"
+    if purpose != "submit":
+        key += ":" + uuid.uuid4().hex
+    job_id, position, _ = db.enqueue_grading_job(
+        key, exam_id, sub_id, host, {"path": path, "checks": list(checks or [])})
+    _start_grading_workers()
+    _grade_wake.set()
+    return position
 
 
 # ==================== 管理员 JSON API（Windows 桌面老师端） ====================
@@ -546,7 +699,7 @@ for _i in range(2):
 @app.route("/admin_api/ping")
 def admin_api_ping():
     """探活 + 是否需首次设密（桌面老师端启动时先调这个）"""
-    return jsonify({"ok": True, "name": "ikee考务中心", "version": "2.2.0",
+    return jsonify({"ok": True, "name": "ikee考务中心", "version": "2.2.1",
                     "setup": auth.needs_setup()})
 
 
@@ -589,10 +742,7 @@ def admin_api_login():
         auth.note_fail()
         return jsonify({"ok": False, "msg": "密码错误"}), 401
     auth.note_ok()
-    session.permanent = True
-    session["admin"] = True
-    session["at"] = int(time.time())
-    session["auth_at"] = auth.updated_at()
+    _start_admin_session()
     return jsonify({"ok": True, "csrf_token": _csrf_token(),
                     "expires_in": ADMIN_SESSION_SECONDS})
 
@@ -614,8 +764,34 @@ def admin_api_exams():
 
 @app.route("/admin_api/logout", methods=["POST"])
 def admin_api_logout():
+    _revoke_current_admin_session()
     session.clear()
     return jsonify({"ok": True})
+
+
+@app.route("/admin_api/password", methods=["POST"])
+def admin_api_change_password():
+    if not _admin_ok():
+        return _admin_fail("未登录", 401)
+    d = request.get_json(silent=True) or {}
+    old = (d.get("old_password") or "").strip()
+    new = (d.get("new_password") or "").strip()
+    confirm = (d.get("confirm_password") or "").strip()
+    left = auth.locked()
+    if left:
+        return _admin_fail(f"尝试次数过多，{left} 秒后再试", 429)
+    if not auth.verify(old):
+        auth.note_fail()
+        return _admin_fail("原密码不正确", 403)
+    auth.note_ok()
+    if len(new) < 6:
+        return _admin_fail("新密码至少 6 位", 400)
+    if new != confirm:
+        return _admin_fail("两次输入的新密码不一致", 400)
+    auth.set_password(new)
+    _revoke_current_admin_session()
+    session.clear()
+    return jsonify({"ok": True, "msg": "密码已修改，请重新登录"})
 
 
 def _admin_fail(msg, code=400):
@@ -683,15 +859,29 @@ def _roster_rows(text):
     return rows
 
 
+def _question_field(value, name):
+    text = str(value or "")
+    if len(text.encode("utf-8")) > QUESTION_IMPORT_MAX_FIELD_BYTES:
+        raise QuestionImportBudgetError(f"{name}超过长度限制")
+    return text
+
+
+def _question_list(value, name):
+    encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(value) > QUESTION_IMPORT_MAX_OPTIONS or len(encoded) > QUESTION_IMPORT_MAX_FIELD_BYTES:
+        raise QuestionImportBudgetError(f"{name}超过长度限制")
+    return value
+
+
 def _question_payload(data, current=None):
     """把桌面端 JSON 题目转成与网页表单一致的数据库字段。"""
     d = dict(data or {})
     old = dict(current or {})
-    qtype = str(d.get("qtype", old.get("qtype", "single"))).lower()
+    qtype = _question_field(d.get("qtype", old.get("qtype", "single")), "题型").lower()
     if qtype not in ("single", "multi", "judge", "blank", "code", "drag"):
         raise ValueError("不支持的题型")
-    stem = str(d.get("stem", old.get("stem", ""))).strip()
-    answer = str(d.get("answer", old.get("answer", ""))).strip()
+    stem = _question_field(d.get("stem", old.get("stem", "")), "题干").strip()
+    answer = _question_field(d.get("answer", old.get("answer", "")), "答案").strip()
     if not stem:
         raise ValueError("题干不能为空")
     if not answer:
@@ -710,7 +900,8 @@ def _question_payload(data, current=None):
             opts = [x.strip() for x in opts.splitlines() if x.strip()]
     if not isinstance(opts, list):
         raise ValueError("选项格式不对")
-    opts = [str(x).strip() for x in opts if str(x).strip()]
+    _question_list(opts, "选项")
+    opts = [_question_field(x, "选项").strip() for x in opts if str(x).strip()]
     if qtype in ("single", "multi"):
         if len(opts) < 2:
             raise ValueError("选择题至少需要两个选项")
@@ -730,7 +921,7 @@ def _question_payload(data, current=None):
         if not opts:
             opts = ["正确", "错误"]
     elif qtype == "code":
-        code = str(d.get("code", old.get("code", "")) or "")
+        code = _question_field(d.get("code", old.get("code", "")), "代码模板")
         if db.count_blanks(code) == 0:
             raise ValueError("代码模板需要 ____ 空位")
         if len([x for x in answer.split("||") if x.strip()]) != db.count_blanks(code):
@@ -742,6 +933,9 @@ def _question_payload(data, current=None):
                 slots = (json.loads(old.get("payload") or "{}").get("slots") or [])
             except Exception:
                 slots = []
+        if not isinstance(slots, list):
+            raise ValueError("拖拽槽位格式不对")
+        _question_list(slots, "拖拽槽位")
         if len(opts) < 2 or len(slots) < 2:
             raise ValueError("拖拽题至少需要两个拖拽项和两个槽位")
         pairs, plain = [], []
@@ -768,19 +962,45 @@ def _question_payload(data, current=None):
         answer = "|".join(pairs)
     return {
         "qtype": qtype, "stem": stem, "options": opts, "answer": answer,
-        "score": score, "category": str(d.get("category", old.get("category", "")) or ""),
-        "difficulty": str(d.get("difficulty", old.get("difficulty", "")) or ""),
-        "source": str(d.get("source", old.get("source", "")) or ""),
-        "language": str(d.get("language", old.get("language", "python")) or "python")
+        "score": score, "category": _question_field(d.get("category", old.get("category", "")), "分类"),
+        "difficulty": _question_field(d.get("difficulty", old.get("difficulty", "")), "难度"),
+        "source": _question_field(d.get("source", old.get("source", "")), "来源"),
+        "language": _question_field(d.get("language", old.get("language", "python")) or "python", "语言")
                     if qtype == "code" else "",
-        "code": str(d.get("code", old.get("code", "")) or "") if qtype == "code" else "",
-        "stdin_data": str(d.get("stdin_data", old.get("stdin_data", "")) or "")
+        "code": _question_field(d.get("code", old.get("code", "")), "代码模板") if qtype == "code" else "",
+        "stdin_data": _question_field(d.get("stdin_data", old.get("stdin_data", "")), "标准输入")
                       if qtype == "code" else "",
-        "expected_output": str(d.get("expected_output", old.get("expected_output", "")) or "")
+        "expected_output": _question_field(d.get("expected_output", old.get("expected_output", "")), "期望输出")
                            if qtype == "code" else "",
         "payload": json.dumps({"slots": slots, "layout": layout}, ensure_ascii=False)
                    if qtype == "drag" else "",
     }
+
+
+def _question_import_bytes(item):
+    return len(json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _validate_question_import_budget(items):
+    if len(items) > QUESTION_IMPORT_MAX_ITEMS:
+        raise QuestionImportBudgetError(f"题目数量超过 {QUESTION_IMPORT_MAX_ITEMS} 条限制")
+    total = sum(_question_import_bytes(item) for item in items)
+    if total > QUESTION_IMPORT_MAX_TEXT_BYTES:
+        raise QuestionImportBudgetError(f"题目总大小超过 {QUESTION_IMPORT_MAX_TEXT_BYTES} 字节限制")
+
+
+def _clean_question_import(items):
+    _validate_question_import_budget(items)
+    clean = []
+    for item in items:
+        try:
+            clean.append(_question_payload(item))
+        except QuestionImportBudgetError:
+            raise
+        except ValueError:
+            continue
+    _validate_question_import_budget(clean)
+    return clean
 
 
 def _validate_rules(checks):
@@ -805,7 +1025,7 @@ def _validate_rules(checks):
     return clean
 
 
-def _validate_material_names(materials):
+def _validate_material_names(materials, require_exists=False):
     if not isinstance(materials, list):
         raise ValueError("素材必须是数组")
     out = []
@@ -813,6 +1033,8 @@ def _validate_material_names(materials):
         safe = _safe_name(name, "")
         if not safe or safe != str(name):
             raise ValueError("素材文件名不能包含路径分隔符")
+        if require_exists and not os.path.isfile(os.path.join(MATERIAL_DIR, safe)):
+            raise ValueError(f"素材文件不存在：{safe}")
         if safe not in out:
             out.append(safe)
     return out
@@ -879,7 +1101,7 @@ def _save_exam_config(eid, data, creating=False):
             raise ValueError("素材格式不对")
     if not isinstance(materials, list):
         raise ValueError("素材格式不对")
-    materials = _validate_material_names(materials)
+    materials = _validate_material_names(materials, require_exists=True)
     qids = _clean_id_list(data.get("question_ids")) if "question_ids" in data else None
     pids = _clean_id_list(data.get("practice_ids")) if "practice_ids" in data else None
     if qids is not None and any(not db.get_question(qid) for qid in qids):
@@ -894,7 +1116,6 @@ def _save_exam_config(eid, data, creating=False):
         "requirement": str(data.get("requirement", ex.get("requirement", "")) or ""),
         "materials": materials, "save_as": "",
         "checks": checks, "require_complete": int(bool(data.get("require_complete", ex.get("require_complete")))),
-        "passwordless": int(bool(data.get("passwordless", ex.get("passwordless")))),
         "finish_note": str(data.get("finish_note", ex.get("finish_note", "")) or ""),
         "klass": str(data.get("klass", ex.get("klass", "")) or "").strip(),
     })
@@ -903,14 +1124,7 @@ def _save_exam_config(eid, data, creating=False):
     if qids is not None:
         db.set_exam_questions(eid, qids)
     if pids is not None:
-        c = db.conn()
-        c.execute("DELETE FROM exam_practice WHERE exam_id=?", (eid,))
-        c.commit()
-        c.close()
-        for pid in pids:
-            db.add_task_to_exam(eid, pid)
-        db._sync_exam_legacy(eid)
-        # 任务自身 save_as 保留在 practice_questions；考试级字段不再保存教师输入。
+        db.set_exam_practice(eid, pids)
         db.update_exam(eid, {"save_as": ""})
     if "roster" in data:
         db.set_roster(eid, _roster_rows(data.get("roster")))
@@ -939,6 +1153,7 @@ def admin_api_dashboard():
 
 
 @app.route("/admin_api/exams", methods=["POST"])
+@_material_locked
 def admin_api_exam_create():
     if not _admin_ok():
         return _admin_fail("未登录", 401)
@@ -979,6 +1194,7 @@ def admin_api_exam_create():
 
 
 @app.route("/admin_api/exam/<int:eid>", methods=["GET", "PUT", "DELETE"])
+@_material_locked
 def admin_api_exam_detail(eid):
     if not _admin_ok():
         return _admin_fail("未登录", 401)
@@ -1028,22 +1244,21 @@ def _copy_exam_config(eid):
         "title": f"{ex['title']}-副本",
         "etype": ex.get("etype") or "",
         "duration": ex.get("duration") or 60,
-        "theory_duration": ex.get("duration") or 60,
+        "theory_duration": ex.get("theory_duration") or ex.get("duration") or 60,
         "requirement": ex.get("requirement") or "",
         "materials": materials,
         "save_as": "",
         "checks": checks,
         "require_complete": bool(ex.get("require_complete")),
-        "passwordless": bool(ex.get("passwordless")),
         "klass": ex.get("klass") or "",
     })
     # create_exam 的旧 INSERT 未包含 finish_note，复制时显式补齐。
-    db.update_exam(new_id, {"finish_note": ex.get("finish_note") or ""})
+    db.update_exam(new_id, {"finish_note": ex.get("finish_note") or "",
+                            "passwordless": int(bool(ex.get("passwordless")))})
     db.set_question_types(new_id, _selected_types(ex))
-    db.set_exam_questions(new_id, db.exam_question_ids(eid))
-    for task in db.exam_tasks(eid):
-        db.add_task_to_exam(new_id, task["id"])
-    db.set_roster(new_id, db.roster_text_of(eid))
+    db.copy_exam_content(eid, new_id)
+    roster_text = db.roster_text_of(eid)
+    db.set_roster(new_id, _roster_rows(roster_text) if roster_text else [])
     db.set_typing_config(new_id, _typing_config_of(ex))
     # 用表单配置而非下发配置，关闭画图题型时也能保留老师以前填的内容。
     db.set_drawing_config(new_id, _drawing_form_cfg(ex))
@@ -1052,6 +1267,7 @@ def _copy_exam_config(eid):
 
 
 @app.route("/admin_api/exam/<int:eid>/copy", methods=["POST"])
+@_material_locked
 def admin_api_exam_copy(eid):
     if not _admin_ok():
         return _admin_fail("未登录", 401)
@@ -1097,13 +1313,7 @@ def admin_api_exam_practice(eid):
     pids = _clean_id_list((request.get_json(silent=True) or {}).get("practice_ids"))
     if any(not db.get_practice(pid) for pid in pids):
         return _admin_fail("包含不存在的实操题")
-    c = db.conn()
-    c.execute("DELETE FROM exam_practice WHERE exam_id=?", (eid,))
-    c.commit()
-    c.close()
-    for pid in pids:
-        db.add_task_to_exam(eid, pid)
-    db._sync_exam_legacy(eid)
+    db.set_exam_practice(eid, pids)
     return jsonify({"ok": True, "practice_ids": pids})
 
 
@@ -1129,7 +1339,42 @@ def admin_api_exam_roster(eid):
     return jsonify({"ok": True, "count": len(db.roster_of(eid)), "roster": db.roster_text_of(eid)})
 
 
+def _delete_exam_material(eid, name):
+    safe = os.path.basename(name)
+    path = os.path.join(MATERIAL_DIR, safe)
+    with _material_lock:
+        trashed = None
+        try:
+            with db._transaction() as c:
+                row = c.execute("SELECT status,materials FROM exams WHERE id=?", (eid,)).fetchone()
+                if not row:
+                    raise LookupError("考试不存在")
+                if row["status"] in ("running", "paused", "stopped"):
+                    raise ValueError("考试进行中或已结束，素材已锁定")
+                files = [x for x in json.loads(row["materials"] or "[]") if x != safe]
+                c.execute("UPDATE exams SET materials=? WHERE id=?",
+                          (json.dumps(files, ensure_ascii=False), eid))
+                used = db.material_references_on(c, safe, exclude_exam=eid)
+                if not used and os.path.isfile(path):
+                    trashed = path + ".delete-" + uuid.uuid4().hex
+                    os.replace(path, trashed)
+        except Exception:
+            if trashed:
+                try:
+                    os.replace(trashed, path)
+                except OSError:
+                    app.logger.exception("素材删除回滚失败: %s", path)
+            raise
+        if trashed:
+            try:
+                os.remove(trashed)
+            except OSError:
+                app.logger.exception("素材临时文件清理失败: %s", trashed)
+        return files, used, trashed is not None
+
+
 @app.route("/admin_api/exam/<int:eid>/materials", methods=["POST"])
+@_material_locked
 def admin_api_exam_material_upload(eid):
     if not _admin_ok():
         return _admin_fail("未登录", 401)
@@ -1163,23 +1408,16 @@ def admin_api_exam_material_upload(eid):
 
 
 @app.route("/admin_api/exam/<int:eid>/materials/<path:name>", methods=["DELETE"])
+@_material_locked
 def admin_api_exam_material_delete(eid, name):
     if not _admin_ok():
         return _admin_fail("未登录", 401)
-    ex, error = _admin_exam_or_404(eid)
-    if error:
-        return error
-    if ex["status"] in ("running", "paused", "stopped"):
-        return _admin_fail("考试进行中或已结束，素材已锁定")
-    safe = os.path.basename(name)
-    files = [x for x in json.loads(ex.get("materials") or "[]") if x != safe]
-    db.update_exam(eid, {"materials": files})
-    path = os.path.join(MATERIAL_DIR, safe)
-    if os.path.isfile(path) and not db.material_used_by_others(safe, exclude_exam=eid):
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+    try:
+        files, _, _ = _delete_exam_material(eid, name)
+    except LookupError:
+        return _admin_fail("考试不存在", 404)
+    except ValueError as e:
+        return _admin_fail(str(e))
     return jsonify({"ok": True, "materials": files})
 
 
@@ -1200,14 +1438,13 @@ def admin_api_exam_start(eid):
     ok, err, _warn = _exam_ready(eid)
     if not ok:
         return _admin_fail(err)
-    klass = str((request.get_json(silent=True) or {}).get("klass") or "").strip()
+    data = request.get_json(silent=True) or {}
+    klass = str(data.get("klass") or "").strip()
     if not klass:
         return _admin_fail("请填写班级")
-    db.set_exam_klass(eid, klass)
-    db.set_exam_status(eid, "running")
-    db.set_phase(eid, "theory")
-    db.bind_exam(eid)
-    db.push_command("all", "start_exam", {"exam_id": eid, "phase": "theory"})
+    ok, err = db.start_exam(eid, klass, bool(data.get("passwordless")))
+    if not ok:
+        return _admin_fail(err)
     return jsonify({"ok": True, "exam": db.get_exam(eid)})
 
 
@@ -1220,8 +1457,9 @@ def admin_api_exam_pause(eid):
         return error
     if ex["status"] != "running":
         return _admin_fail("只有进行中的考试可以暂停")
-    db.set_exam_status(eid, "paused")
-    db.push_command("all", "pause", {"exam_id": eid})
+    ok, err = db.pause_exam(eid)
+    if not ok:
+        return _admin_fail(err)
     return jsonify({"ok": True, "exam": db.get_exam(eid)})
 
 
@@ -1234,8 +1472,9 @@ def admin_api_exam_resume(eid):
         return error
     if ex["status"] != "paused":
         return _admin_fail("考试当前未暂停")
-    db.set_exam_status(eid, "running")
-    db.push_command("all", "resume", {"exam_id": eid})
+    ok, err = db.resume_exam(eid)
+    if not ok:
+        return _admin_fail(err)
     return jsonify({"ok": True, "exam": db.get_exam(eid)})
 
 
@@ -1253,11 +1492,12 @@ def admin_api_exam_phase(eid):
         return _admin_fail("考试未在进行")
     if phase == "practice" and not ({"practice", "typing"} & set(_selected_types(ex))):
         return _admin_fail("本场没有实操或打字题")
-    db.set_phase(eid, phase)
     payload = {"exam_id": eid, "phase": phase}
     if phase == "practice":
         payload.update(etype=ex["etype"], open_wps=True)
-    db.push_command("all", "phase", payload)
+    ok, err = db.transition_phase(eid, phase, payload)
+    if not ok:
+        return _admin_fail(err)
     return jsonify({"ok": True, "exam": db.get_exam(eid)})
 
 
@@ -1271,11 +1511,9 @@ def admin_api_exam_stop(eid):
     if ex["status"] not in ("running", "paused"):
         return _admin_fail("考试未在进行")
     clear_login = bool((request.get_json(silent=True) or {}).get("clear_login"))
-    db.snapshot_exam_students(eid)
-    db.set_exam_status(eid, "stopped")
-    db.set_phase(eid, "ended")
-    db.push_command("all", "force_exit", {"exam_id": eid, "clear_login": clear_login})
-    db.push_command("all", "stop", {"exam_id": eid})
+    ok, err = db.stop_exam(eid, clear_login)
+    if not ok:
+        return _admin_fail(err)
     return jsonify({"ok": True, "exam": db.get_exam(eid)})
 
 
@@ -1350,13 +1588,13 @@ def _batch_exams_xlsx_response(ids):
         sheet.append(["座位号", "姓名", "机器标识", "IP", "理论题", "理论满分",
                       "实操题", "实操满分", "总分", "已交卷", "答卷文件"])
         for row in db.full_report(eid):
-            sheet.append([
+            sheet.append([_spreadsheet_value(value) for value in [
                 row.get("seat") or "", row.get("name") or "", row.get("hostname") or "",
                 row.get("ip") or "", row.get("theory"), row.get("theory_full"),
                 row.get("practice") if row.get("practice") is not None else "",
                 row.get("practice_full"), row.get("total"),
                 "是" if row.get("submitted") else "否", row.get("filename") or "",
-            ])
+            ]])
         for cell in sheet[1]:
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill("solid", fgColor="27324A")
@@ -1398,7 +1636,8 @@ def admin_api_exam_regrade(eid):
     n = 0
     for s in db.list_submissions(eid):
         if s["saved_path"] and os.path.isfile(s["saved_path"]):
-            enqueue_grade(s["id"], s["saved_path"], db.checks_for_submission(ex, s), s["hostname"])
+            enqueue_grade(s["id"], s["saved_path"], db.checks_for_submission(ex, s),
+                          s["hostname"], eid, purpose="regrade")
             n += 1
     return jsonify({"ok": True, "count": n})
 
@@ -1412,8 +1651,12 @@ def admin_api_exam_rejudge(eid):
         return error
     if _ex["status"] == "stopped":
         return _admin_fail("已结束考试只能查看和导出")
-    n, ok = db.rejudge_code_answers(eid)
-    return jsonify({"ok": True, "count": n, "correct": ok})
+    try:
+        n, correct = db.rejudge_code_answers(eid)
+    except RuntimeError as e:
+        return jsonify({"ok": False, "count": 0, "correct": 0,
+                        "msg": str(e)}), 409
+    return jsonify({"ok": True, "count": n, "correct": correct})
 
 
 @app.route("/admin_api/questions", methods=["GET", "POST"])
@@ -1442,7 +1685,10 @@ def admin_api_question(qid):
     if request.method == "GET":
         return jsonify({"ok": True, "question": q})
     if request.method == "DELETE":
-        db.delete_question(qid)
+        try:
+            db.delete_question(qid)
+        except ValueError as e:
+            return _admin_fail(str(e))
         return jsonify({"ok": True})
     try:
         db.update_question(qid, _question_payload(request.get_json(silent=True) or {}, q))
@@ -1455,16 +1701,24 @@ def admin_api_question(qid):
 def admin_api_questions_import():
     if not _admin_ok():
         return _admin_fail("未登录", 401)
-    data = request.get_json(silent=True) or {}
+    if request.content_length and request.content_length > QUESTION_IMPORT_MAX_BYTES:
+        return _admin_fail(f"题目导入超过 {QUESTION_IMPORT_MAX_BYTES} 字节限制", 413)
+    raw = request.get_data(cache=True)
+    if len(raw) > QUESTION_IMPORT_MAX_BYTES:
+        return _admin_fail(f"题目导入超过 {QUESTION_IMPORT_MAX_BYTES} 字节限制", 413)
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _admin_fail("JSON 格式不正确")
+    if not isinstance(data, dict):
+        return _admin_fail("JSON 顶层必须是对象")
     items = data.get("items")
     if not isinstance(items, list):
         return _admin_fail("items 必须是题目数组")
-    clean = []
-    for item in items:
-        try:
-            clean.append(_question_payload(item))
-        except ValueError:
-            continue
+    try:
+        clean = _clean_question_import(items)
+    except ValueError as e:
+        return _admin_fail(str(e), 413)
     ok, skip = db.import_questions(clean)
     return jsonify({"ok": True, "added": ok, "skipped": skip})
 
@@ -1478,6 +1732,7 @@ def admin_api_questions_tidy():
 
 
 @app.route("/admin_api/practice", methods=["GET", "POST"])
+@_material_locked
 def admin_api_practice():
     if not _admin_ok():
         return _admin_fail("未登录", 401)
@@ -1493,7 +1748,7 @@ def admin_api_practice():
         return _admin_fail("评分规则格式不对")
     try:
         checks = _validate_rules(checks)
-        materials = _validate_material_names(data.get("materials") or [])
+        materials = _validate_material_names(data.get("materials") or [], require_exists=True)
     except ValueError as e:
         return _admin_fail(str(e))
     pid, is_new = db.add_practice({
@@ -1506,6 +1761,7 @@ def admin_api_practice():
 
 
 @app.route("/admin_api/practice/<int:pid>", methods=["GET", "PUT", "DELETE"])
+@_material_locked
 def admin_api_practice_detail(pid):
     if not _admin_ok():
         return _admin_fail("未登录", 401)
@@ -1515,7 +1771,10 @@ def admin_api_practice_detail(pid):
     if request.method == "GET":
         return jsonify({"ok": True, "practice": task})
     if request.method == "DELETE":
-        db.delete_practice(pid)
+        try:
+            db.delete_practice(pid)
+        except ValueError as e:
+            return _admin_fail(str(e))
         return jsonify({"ok": True})
     data = request.get_json(silent=True) or {}
     if not str(data.get("name") or "").strip() or data.get("etype") not in ("word", "excel", "ppt"):
@@ -1526,11 +1785,53 @@ def admin_api_practice_detail(pid):
         item = dict(task)
         item.update(data)
         item["checks"] = _validate_rules(item.get("checks") or [])
-        item["materials"] = _validate_material_names(item.get("materials") or [])
+        item["materials"] = _validate_material_names(item.get("materials") or [], require_exists=True)
     except ValueError as e:
         return _admin_fail(str(e))
-    db.update_practice(pid, item)
+    try:
+        db.update_practice(pid, item)
+    except ValueError as e:
+        return _admin_fail(str(e))
     return jsonify({"ok": True, "practice": db.get_practice(pid)})
+
+
+def _update_student_profile(hostname, name, seat):
+    hostname = str(hostname or "").strip()
+    name = str(name or "").strip()
+    seat = str(seat or "").strip()
+    if not hostname:
+        raise ValueError("缺少机器标识")
+    if not name:
+        raise ValueError("姓名不能为空")
+    if len(name) > 30:
+        raise ValueError("姓名过长（最多 30 字）")
+    if len(seat) > 20:
+        raise ValueError("座位号过长（最多 20 位）")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name + seat):
+        raise ValueError("姓名或座位号含非法字符")
+    if any(ch in seat for ch in r'\/:*?"<>|'):
+        raise ValueError("座位号含非法字符")
+    student = db.get_student(hostname)
+    if not student:
+        raise LookupError("学生机不存在")
+    if not db.update_student_profile_atomic(hostname, name, seat):
+        raise LookupError("学生机不存在")
+    return db.get_student(hostname)
+
+
+@app.route("/admin_api/students/update", methods=["POST"])
+def admin_api_student_update():
+    if not _admin_ok():
+        return _admin_fail("未登录", 401)
+    data = request.get_json(silent=True) or {}
+    try:
+        student = _update_student_profile(
+            data.get("hostname"), data.get("name"), data.get("seat"))
+    except LookupError:
+        return _admin_fail("学生机不存在", 404)
+    except ValueError as exc:
+        return _admin_fail(str(exc))
+    return jsonify({"ok": True, "student": student})
 
 
 @app.route("/admin_api/students/reset-token", methods=["POST"])
@@ -1649,16 +1950,81 @@ def _progress(ex, host, participant_id=None):
     return answered, total, submitted
 
 
+def _enabled_typing_tasks(ex):
+    if not ex or "typing" not in _selected_types(ex):
+        return set()
+    cfg = _typing_config_of(ex)
+    return {task for task in TYPING_TASK_ORDER if cfg.get(task, {}).get("enabled", True)}
+
+
+def _refresh_submission_status(eid, host, participant_id):
+    ex = db.get_exam(eid) or {}
+    required = []
+    if any(t in THEORY_TYPES for t in _selected_types(ex)):
+        required.append(db.theory_finished(eid, host, participant_id))
+    tasks = db.exam_tasks(eid)
+    if tasks:
+        required.append(all(
+            db.submission_of_task(eid, host, task["id"], participant_id) for task in tasks))
+    elif "practice" in _selected_types(ex):
+        required.append(db.has_submission(eid, host, participant_id))
+    drawing = _drawing_payload(ex) or {}
+    if drawing.get("styles"):
+        required.append(all(
+            db.drawing_of(eid, host, kind, participant_id) for kind in drawing["styles"]))
+    typing_tasks = _enabled_typing_tasks(ex)
+    if typing_tasks:
+        rows = db.typing_board(eid, typing_tasks)
+        row = next((r for r in rows if r["participant_id"] == participant_id), None)
+        required.append(bool(row) and all(
+            (row.get("tasks") or {}).get(task, {}).get("finished") for task in typing_tasks))
+    if not required:
+        return False
+    complete = all(required)
+    status = "submitted" if complete else "working"
+    db.set_student_status(host, status, eid)
+    db.touch_participant(eid, host, status, participant_id=participant_id)
+    return complete
+
+
 def _write_participant(eid, host, status=None):
     """写接口再次校验本场名单，避免登录后名单变更或空姓名绕过。"""
     stu = db.get_student(host) or {}
-    name = (stu.get("name") or "").strip()
+    ex = db.get_exam(eid) or {}
+    if ex.get("status") == "stopped":
+        pid = db.current_participant(host, eid)
+        snapshot = db.participant_snapshot(eid, pid)
+        if not snapshot or snapshot.get("hostname") != host:
+            return 0, "该学生未参加本场考试，不能在收卷宽限期内新建参与记录"
+        name = (snapshot.get("name") or "").strip()
+        seat = snapshot.get("seat") or ""
+    else:
+        name = (stu.get("name") or "").strip()
+        seat = stu.get("seat") or ""
     if not name:
         return 0, "请先填写学生姓名"
-    ok, msg = db.roster_check(eid, name, stu.get("seat") or "")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name + str(seat)):
+        return 0, "学生姓名或座位号含非法字符"
+    ok, msg = db.roster_check(eid, name, seat,
+                              ip=request.remote_addr or "",
+                              passwordless=bool(ex.get("passwordless")))
     if not ok:
         return 0, msg
-    return _mark_participant(eid, host, status), ""
+    if ex.get("status") == "stopped":
+        db.touch_participant(eid, host, status, participant_id=pid)
+        return pid, ""
+    pid = _mark_participant(eid, host, status)
+    return pid, "" if pid else "无法确认考生身份"
+
+
+def _participant_for_read(ex, host, stu):
+    if ex["status"] == "stopped":
+        pid = db.current_participant(host, ex["id"])
+        snapshot = db.participant_snapshot(ex["id"], pid)
+        if not snapshot or snapshot.get("hostname") != host:
+            return 0, "本机未参加本场考试"
+        return pid, ""
+    return _write_participant(ex["id"], host)
 
 
 def _mark_participant(eid, host, status=None):
@@ -1672,7 +2038,7 @@ def _mark_participant(eid, host, status=None):
                                  request.remote_addr or stu.get("ip") or "")
         db.set_current_participant(host, eid, pid)
         if status:
-            db.touch_participant(eid, host, status)
+            db.touch_participant(eid, host, status, participant_id=pid)
         return pid
     except Exception:
         return 0
@@ -1688,27 +2054,72 @@ def api_hello():
 
     name = (d.get("name") or "").strip()
     seat = (d.get("seat") or "").strip()
-    client_ip = request.remote_addr or d.get("ip", "") or ""
+    client_ip = request.remote_addr or ""
     ex = _student_exam()
     passwordless = bool(ex and ex.get("passwordless"))
+    stopped_snapshot = None
+    identity_change = False
+    profile_correction = db.has_pending_command(host, "update_profile")
+    if ex and ex["status"] == "stopped":
+        pid = db.current_participant(host, ex["id"])
+        stopped_snapshot = db.participant_snapshot(ex["id"], pid)
+        if not stopped_snapshot or stopped_snapshot.get("hostname") != host:
+            ex = None
+        elif (name and seat and not profile_correction
+              and (name != (stopped_snapshot.get("name") or "").strip()
+                   or seat != (stopped_snapshot.get("seat") or ""))):
+            identity_change = True
+            ex = None
+            stopped_snapshot = None
+            passwordless = False
+    if not ex:
+        if not name or not seat:
+            return jsonify({"ok": False, "msg": "请先填写姓名和座位号"}), 403
+        if len(name) > 30:
+            return jsonify({"ok": False, "msg": "姓名过长（最多 30 字）"}), 403
+        if len(seat) > 20:
+            return jsonify({"ok": False, "msg": "座位号过长（最多 20 位）"}), 403
     if ex:
+        if ex["status"] == "stopped":
+            name = (stopped_snapshot.get("name") or "").strip()
+            seat = stopped_snapshot.get("seat") or ""
         if passwordless:
             matched = db.roster_by_ip(ex["id"], client_ip)
-            if matched:
-                name = matched.get("name") or name
-                seat = matched.get("seat") or seat
-            elif not name:
-                name = f"IP-{client_ip or host}"
-        ok_r, msg_r = db.roster_check(
-            ex["id"], name, seat, ip=client_ip, passwordless=passwordless)
-        if not ok_r:
-            return jsonify({"ok": False, "msg": msg_r}), 403
+            if matched and not stopped_snapshot:
+                name = matched.get("name") or "IP学生"
+                seat = matched.get("seat") or ""
+            elif not matched and not db.roster_of(ex["id"]):
+                name = name or f"IP-{client_ip or host}"
+            elif not matched:
+                return jsonify({"ok": False, "msg": "本机 IP 不在本场免密码考试名单里"}), 403
+        if not profile_correction:
+            ok_r, msg_r = db.roster_check(
+                ex["id"], name, seat, ip=client_ip, passwordless=passwordless)
+            if not ok_r:
+                return jsonify({"ok": False, "msg": msg_r}), 403
 
     ok, msg, issued = db.register_student(
         host, client_ip, d.get("mac", ""),
-        name=name, seat=seat, token=_request_token(d))
+        name=name, seat=seat, token=_request_token(d),
+        preserve_profile=profile_correction, clear_participant=identity_change)
     if not ok:
         return jsonify({"ok": False, "msg": msg}), 403
+    student_record = db.get_student(host) or {}
+    name = student_record.get("name") or ""
+    seat = student_record.get("seat") or ""
+    if stopped_snapshot:
+        name = (stopped_snapshot.get("name") or "").strip()
+        seat = stopped_snapshot.get("seat") or ""
+    if ex:
+        if not stopped_snapshot and not profile_correction:
+            ok_r, msg_r = db.roster_check(
+                ex["id"], name, seat, ip=client_ip, passwordless=passwordless)
+            if not ok_r:
+                return jsonify({"ok": False, "msg": msg_r}), 403
+        matched = db.roster_by_ip(ex["id"], client_ip) if passwordless else None
+        if matched and (name != (matched.get("name") or "IP学生")
+                        or seat != (matched.get("seat") or "")):
+            return jsonify({"ok": False, "msg": "本机学生信息与免密码考试名单不一致"}), 403
     db.heartbeat(host, d.get("status"))
 
     if not ex:
@@ -1717,15 +2128,17 @@ def api_hello():
                         "student": {"name": name, "seat": seat, "hostname": host},
                         "token": issued, "commands": db.fetch_commands(host)})
 
-    pid = 0
+    phase = _exam_phase(ex)
+    pid = db.current_participant(host, ex["id"]) if ex["status"] == "stopped" else 0
     if ex["status"] in ("running", "paused"):
         if name:
             pid = db.add_participant(ex["id"], host, name, seat, client_ip)
-            db.touch_participant(ex["id"], host, d.get("status") or "idle")
+            db.touch_participant(ex["id"], host, d.get("status") or "idle",
+                                 participant_id=pid)
         db.set_current_participant(host, ex["id"], pid)
     who = {"name": name, "seat": seat, "hostname": host, "ip": client_ip}
 
-    cmds = db.fetch_commands(host)
+    cmds = db.fetch_commands(host, ex["id"], phase)
     qtypes = json.loads(ex.get("question_types") or "[]")
     if not qtypes:
         # 没设置题型时默认全部开启（兼容旧考试）
@@ -1739,7 +2152,6 @@ def api_hello():
 
     # 学生进度（轻量查询）
     theory_n, theory_total, _ = _progress(ex, host, pid)
-    phase = _exam_phase(ex)
 
     # 这场考试装了哪些实操题（一场可以装多道）
     tasks = _tasks_for(ex["id"], host, pid)
@@ -1817,13 +2229,17 @@ def api_poll():
         progress = json.loads(request.args.get("progress") or "{}")
     except Exception:
         progress = {}
-    db.heartbeat(host, request.args.get("status") or None, progress)
-    cmds = db.fetch_commands(host)
     ex = _student_exam()
-    pid = db.current_participant(host, ex["id"]) if ex else 0
-    if ex and ex["status"] in ("running", "paused"):
-        db.touch_participant(ex["id"], host)
+    pid = 0
+    if ex:
+        pid, msg = _participant_for_read(ex, host, _stu)
+        if not pid:
+            return jsonify({"ok": False, "msg": msg}), 403
+    db.heartbeat(host, request.args.get("status") or None, progress)
     phase = _exam_phase(ex)
+    cmds = db.fetch_commands(host, ex["id"] if ex else None, phase)
+    if pid:
+        db.touch_participant(ex["id"], host, participant_id=pid)
 
     # 学生进度（轻量查询：COUNT + EXISTS，不查整份试卷、不拉全班答卷）
     theory_n, theory_total, has_sub = _progress(ex, host, pid)
@@ -1835,6 +2251,8 @@ def api_poll():
 
     return jsonify({
         "ok": True, "phase": phase, "commands": cmds,
+        "exam_id": ex["id"] if ex else None,
+        "passwordless": bool(ex and ex.get("passwordless")),
         "theory_answered": theory_n, "theory_total": theory_total,
         "practice_submitted": has_submitted,
         "remaining": db.phase_remaining(ex["id"]) if ex else None,
@@ -1862,6 +2280,9 @@ def api_paper():
         return jsonify({"ok": False, "msg": "当前没有考试"})
     if ex["status"] not in ("running", "paused"):
         return jsonify({"ok": False, "msg": "考试已结束"})
+    pid, msg = _participant_for_read(ex, host, _stu)
+    if not pid:
+        return jsonify({"ok": False, "msg": msg}), 403
 
     eid = ex["id"]
 
@@ -1895,7 +2316,6 @@ def api_paper():
         return items
 
     paper = db.hot_get(f"paper:{eid}", _build_paper)
-    pid = db.current_participant(host, eid)
     answered = db.theory_answers_of(eid, host, pid)
     return jsonify({
         "ok": True,
@@ -1931,7 +2351,16 @@ def api_theory_submit():
     pid, msg = _write_participant(int(eid), host, "working")
     if not pid:
         return jsonify({"ok": False, "msg": msg}), 403
-    db.save_theory_answers(int(eid), host, answers, pid)
+    versions = d.get("versions") or d.get("answer_versions") or {}
+    if not isinstance(versions, dict):
+        return jsonify({"ok": False, "msg": "versions 格式不对"}), 400
+    try:
+        db.save_theory_answers(int(eid), host, answers, pid, versions=versions,
+                               cancel_event=db.exam_cancel_event(int(eid)))
+    except RuntimeError as exc:
+        return jsonify({"ok": False, "msg": str(exc)}), 409
+    except PermissionError as exc:
+        return jsonify({"ok": False, "msg": str(exc)}), 403
     score, n = db.theory_score(int(eid), host, pid)
     return jsonify({"ok": True, "score": score, "answered": n})
 
@@ -1985,22 +2414,39 @@ def api_typing_report():
     pid, msg = _write_participant(int(eid), host, "working")
     if not pid:
         return jsonify({"ok": False, "msg": msg}), 403
-    db.save_typing_report(int(eid), host, reports[:8], pid)
+    try:
+        db.save_typing_report(int(eid), host, reports[:8], pid,
+                              allowed_tasks=_enabled_typing_tasks(ex))
+    except PermissionError as exc:
+        return jsonify({"ok": False, "msg": str(exc)}), 403
+    _refresh_submission_status(int(eid), host, pid)
     return jsonify({"ok": True, "participant_id": pid})
 
 
 @app.route("/api/material/<path:name>")
 def api_material(name):
     """下载实操素材"""
-    _host, _stu, err = _student_auth()
+    ex = _student_exam()
+    if not ex or ex["status"] not in ("running", "paused"):
+        return jsonify({"ok": False, "msg": "当前没有可下载的考试素材"}), 403
+    host, _stu, err = _student_auth()
     if err:
         return jsonify({"ok": False, "msg": err}), 403
+    pid, msg = _participant_for_read(ex, host, _stu)
+    if not pid:
+        return jsonify({"ok": False, "msg": msg}), 403
     # 防路径穿越：素材全部平铺存储，只取文件名部分
     safe = os.path.basename(name)
+    allowed = set(json.loads(ex.get("materials") or "[]"))
+    for task in db.exam_tasks(ex["id"]):
+        allowed.update(task.get("materials") or [])
     p = os.path.join(MATERIAL_DIR, safe)
-    if not safe or not os.path.isfile(p):
+    real = os.path.realpath(p)
+    root = os.path.realpath(MATERIAL_DIR)
+    if (safe not in allowed or not safe or os.path.islink(p)
+            or os.path.commonpath((real, root)) != root or not os.path.isfile(real)):
         return "素材不存在", 404
-    return send_file(p, as_attachment=True, download_name=safe)
+    return send_file(real, as_attachment=True, download_name=safe)
 
 
 # ---------------- 理论题选项图片（小学模块：选项可以放图片） ----------------
@@ -2078,20 +2524,24 @@ def api_upload():
     pid, msg = _write_participant(eid, host, "working")
     if not pid:
         return jsonify({"ok": False, "msg": msg}), 403
-    if not _valid_office_upload(f):
-        return jsonify({"ok": False, "msg": "文件不是有效的 Word / Excel / PPT 文档"}), 400
-    safe = _safe_name(f.filename, "答卷")
-
-    # 一场考试可能装了多道操作题：这道题用哪份评分规则
-    checks_raw = ex["checks"] or "[]"
     if task_id:
         # task_id 必须属于本场考试，否则归档/评分都会串
         if not db.task_in_exam(eid, task_id):
             return jsonify({"ok": False, "msg": "这道操作题不属于本场考试"}), 400
         task = db.get_practice(task_id)
-        if task:
-            checks_raw = json.dumps(task["checks"], ensure_ascii=False)
-            ex = dict(ex, checks=checks_raw)
+        if not task:
+            return jsonify({"ok": False, "msg": "这道操作题不存在"}), 400
+        checks_raw = json.dumps(task["checks"], ensure_ascii=False)
+        ex = dict(ex, checks=checks_raw)
+        allowed_types = {str(task.get("etype") or "").lower()}
+    else:
+        allowed_types = {str(t).lower() for t in _practice_types_of(ex)}
+    uploaded_ext = os.path.splitext(f.filename or "")[1].lower()
+    if uploaded_ext not in {EXT_OF.get(t) for t in allowed_types}:
+        return jsonify({"ok": False, "msg": "文件类型与这道操作题不匹配"}), 400
+    if not _valid_office_upload(f):
+        return jsonify({"ok": False, "msg": "文件不是有效的 Word / Excel / PPT 文档"}), 400
+    safe = _safe_name(f.filename, "答卷")
 
     # host 来自客户端表单，同样要净化，防止 ../ 写出目录
     safe_host = _safe_name(host, "unknown")
@@ -2102,14 +2552,20 @@ def api_upload():
     code = _safe_name(ex.get("code"), f"exam{eid}")
     dest_dir = os.path.join(UPLOAD_DIR, "ikee_Exam", klass)
     os.makedirs(dest_dir, exist_ok=True)
-    dest = os.path.join(dest_dir, f"{code}_{safe_host}_p{pid}_{safe}")
-    f.save(dest)
-
-    sub_id = db.save_submission(host, eid, safe, dest,
-                                os.path.getsize(dest), task_id=task_id,
-                                participant_id=pid)
-    db.set_student_status(host, "submitted", eid)
-    db.touch_participant(eid, host, "submitted")
+    dest = os.path.join(dest_dir, f"{code}_{safe_host}_p{pid}_{uuid.uuid4().hex}_{safe}")
+    with _artifact_write_lock:
+        f.save(dest)
+        try:
+            sub_id = db.save_submission(host, eid, safe, dest,
+                                        os.path.getsize(dest), task_id=task_id,
+                                        participant_id=pid)
+        except PermissionError as exc:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            return jsonify({"ok": False, "msg": str(exc)}), 403
+        _refresh_submission_status(eid, host, pid)
     db.log(host, "info",
            f"提交答卷 {safe}" + (f"（操作题 #{task_id}）" if task_id else ""))
 
@@ -2118,7 +2574,7 @@ def api_upload():
     try:
         checks = json.loads(ex["checks"] or "[]")
         if checks:
-            n = enqueue_grade(sub_id, dest, checks, host)
+            n = enqueue_grade(sub_id, dest, checks, host, eid)
             auto = {"pending": True, "msg": f"已提交，正在评分（队列 {n}）"}
         else:
             auto = {"msg": "本场考试未配置评分规则"}
@@ -2172,12 +2628,21 @@ def api_drawing_upload():
     tag = "拼豆" if kind == "beads" else "画板"
     dest_dir = os.path.join(UPLOAD_DIR, "drawing", klass)
     os.makedirs(dest_dir, exist_ok=True)
-    dest = os.path.join(dest_dir, f"{code}_{safe_host}_p{pid}_{tag}{ext}")
-    f.save(dest)
-    size = os.path.getsize(dest)
-    db.save_drawing(eid, host, os.path.basename(dest), dest, size, kind=kind,
-                    participant_id=pid)
-    db.touch_participant(eid, host, "submitted")
+    dest = os.path.join(dest_dir,
+                        f"{code}_{safe_host}_p{pid}_{uuid.uuid4().hex}_{tag}{ext}")
+    with _artifact_write_lock:
+        f.save(dest)
+        try:
+            size = os.path.getsize(dest)
+            db.save_drawing(eid, host, f"{tag}{ext}", dest, size, kind=kind,
+                            participant_id=pid)
+        except PermissionError as exc:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            return jsonify({"ok": False, "msg": str(exc)}), 403
+        _refresh_submission_status(eid, host, pid)
     db.log(host, "info", f"提交{tag}作品（{size // 1024} KB）")
     return jsonify({"ok": True, "size": size})
 
@@ -2207,17 +2672,20 @@ def api_upload_empty():
         return jsonify({"ok": False, "msg": "考试已结束，不能再提交答卷"}), 403
     if task_id and not db.task_in_exam(eid, task_id):
         return jsonify({"ok": False, "msg": "这道操作题不属于本场考试"}), 400
-    pid, msg = _write_participant(eid, host, "submitted")
+    pid, msg = _write_participant(eid, host, "working")
     if not pid:
         return jsonify({"ok": False, "msg": msg}), 403
     checks = db.checks_for_submission(ex, {"task_id": task_id})
     full = round(sum(float(c.get("score", 0)) for c in checks), 2)
-    sub_id = db.save_submission(host, eid, "（缺卷·未作答）", "", 0,
-                                task_id=task_id, participant_id=pid)
+    try:
+        sub_id = db.save_submission(host, eid, "（缺卷·未作答）", "", 0,
+                                    task_id=task_id, participant_id=pid)
+    except PermissionError as exc:
+        return jsonify({"ok": False, "msg": str(exc)}), 403
     db.update_score(sub_id, 0.0, full,
                     [{"id": "缺卷", "got": 0, "full": full,
                       "msg": "学生确认交卷时未作答，按 0 分处理"}])
-    db.set_student_status(host, "submitted", eid)
+    _refresh_submission_status(eid, host, pid)
     db.log(host, "info",
            f"缺卷提交（操作题 #{task_id or 1}，未作答按 0 分）" if task_id
            else "缺卷提交（未作答按 0 分）")
@@ -3154,6 +3622,7 @@ def exam_new():
 
 
 @app.route("/exam/<int:eid>", methods=["GET", "POST"])
+@_material_locked
 def exam_edit(eid):
     ex = db.get_exam(eid)
     if not ex:
@@ -3246,7 +3715,6 @@ def exam_edit(eid):
             "save_as": "",
             "checks": checks,
             "require_complete": 1 if request.form.get("require_complete") else 0,
-            "passwordless": 1 if request.form.get("passwordless") else 0,
             # 交卷结束语（学生交卷后看到的话；做完 / 没做完都显示）
             "finish_note": request.form.get("finish_note", ""),
         })
@@ -3361,7 +3829,7 @@ def _replace_exam_type_questions(eid, qtype, qids):
 
 @app.route("/exam/<int:eid>/questions/<qtype>", methods=["POST"])
 def exam_save_type_questions(eid, qtype):
-    """网页选题底部按钮：保存当前题型的全部勾选状态。"""
+    """网页选题自动保存：保存当前题型的全部勾选状态。"""
     ex = db.get_exam(eid)
     if not ex:
         flash("考试不存在", "err")
@@ -3411,15 +3879,12 @@ def exam_addq(eid):
     tab = request.form.get("tab", "")
     have = db.exam_question_ids(eid)
     added = 0
-    c = db.conn()
     for qid in qids:
-        if qid not in have:
-            c.execute("INSERT OR IGNORE INTO exam_questions(exam_id,question_id,qorder) VALUES(?,?,?)",
-                      (eid, qid, len(have)))
-            added += 1
+        if qid not in have and db.get_question(qid):
             have.append(qid)
-    c.commit()
-    c.close()
+            added += 1
+    if added:
+        db.set_exam_questions(eid, have)
     if added:
         flash(f"已加入 {added} 题")
     else:
@@ -3531,31 +3996,20 @@ def exam_random(eid):
 
 
 @app.route("/exam/<int:eid>/material/del/<path:name>", methods=["POST"])
+@_material_locked
 def exam_del_material(eid, name):
-    ex = db.get_exam(eid)
-    if not ex:
+    try:
+        _, used, removed = _delete_exam_material(eid, name)
+    except LookupError:
         flash("考试不存在", "err")
         return redirect(url_for("index"))
-    if _paper_locked(ex):
-        return redirect(url_for("exam_edit", eid=eid, tab="practice"))
-    files = json.loads(ex["materials"] or "[]")
-    files = [f for f in files if f != name]
-    c = db.conn()
-    c.execute("UPDATE exams SET materials=? WHERE id=?", (json.dumps(files, ensure_ascii=False), eid))
-    c.commit()
-    c.close()
-    # 磁盘上的文件一并删掉，不然 materials/ 会越堆越多；
-    # 但删之前先确认没有别的考试/实操题还在用这份素材
-    p = os.path.join(MATERIAL_DIR, os.path.basename(name))
-    try:
-        if os.path.isfile(p):
-            used = db.material_used_by_others(name, exclude_exam=eid)
-            if used:
-                flash(f"记录已从本场考试移除；素材文件保留（{'、'.join(used[:3])} 仍在引用）")
-            else:
-                os.remove(p)
-    except OSError as e:
-        flash(f"记录已删除，但文件没删掉：{e}", "err")
+    except ValueError as e:
+        flash(str(e), "err")
+        return redirect(url_for("exam_edit", eid=eid))
+    if used:
+        flash(f"记录已从本场考试移除；素材文件保留（{'、'.join(used[:3])} 仍在引用）")
+    elif not removed:
+        flash("记录已从本场考试移除")
     return redirect(url_for("exam_edit", eid=eid))
 
 
@@ -3617,12 +4071,10 @@ def exam_start(eid):
         flash("请填写班级（考场编号）—— 学生答卷会按班级归档", "err")
         return redirect(url_for("exam_start", eid=eid))
 
-    db.set_exam_klass(eid, klass)
-    db.set_exam_status(eid, "running")
-    db.set_phase(eid, "theory")
-    db.bind_exam(eid)
-    db.push_command("all", "start_exam",
-                    {"exam_id": eid, "phase": "theory"})
+    ok, err = db.start_exam(eid, klass, bool(request.form.get("passwordless")))
+    if not ok:
+        flash(err, "err")
+        return redirect(url_for("exam_start", eid=eid))
     db.log("teacher", "info",
            f"开始考试 #{eid}「{ex['title']}」编号={ex.get('code') or '-'} "
            f"班级={klass}，阶段=理论题")
@@ -3646,8 +4098,10 @@ def exam_pause(eid):
     if ex["status"] != "running":
         flash("只有正在进行中的考试才能暂停", "err")
         return redirect(url_for("index"))
-    db.set_exam_status(eid, "paused")
-    db.push_command("all", "pause", {"exam_id": eid})
+    ok, err = db.pause_exam(eid)
+    if not ok:
+        flash(err, "err")
+        return redirect(url_for("index"))
     db.log("teacher", "info", f"暂停考试 #{eid}")
     flash("考试已暂停，学生端停止计时")
     return redirect(url_for("index"))
@@ -3663,8 +4117,10 @@ def exam_resume(eid):
     if ex["status"] != "paused":
         flash("这场考试当前不是暂停状态，不需要恢复", "err")
         return redirect(url_for("index"))
-    db.set_exam_status(eid, "running")
-    db.push_command("all", "resume", {"exam_id": eid})
+    ok, err = db.resume_exam(eid)
+    if not ok:
+        flash(err, "err")
+        return redirect(url_for("index"))
     db.log("teacher", "info", f"恢复考试 #{eid}")
     flash("考试已恢复")
     return redirect(url_for("index"))
@@ -3691,12 +4147,14 @@ def exam_set_phase(eid, phase):
     if phase == "ended":
         # 走和「结束考试」同一条路，避免出现 status=running 但 phase=ended
         return exam_stop(eid)
-    db.set_phase(eid, phase)
     payload = {"exam_id": eid, "phase": phase}
     if phase == "practice":
         payload["etype"] = ex["etype"]
         payload["open_wps"] = True
-    db.push_command("all", "phase", payload)
+    ok, err = db.transition_phase(eid, phase, payload)
+    if not ok:
+        flash(err, "err")
+        return redirect(url_for("index"))
     db.log("teacher", "info", f"切换阶段 -> {phase}")
     flash("已切到" + ("实操阶段" if phase == "practice" else "理论题阶段"))
     return redirect(url_for("index"))
@@ -3720,14 +4178,10 @@ def exam_stop(eid):
         return redirect(url_for("index"))
     clear_login = request.form.get("clear_login") == "1"
     n_online = db.stats(eid)["online"]
-    db.snapshot_exam_students(eid)
-    db.set_exam_status(eid, "stopped")
-    db.set_phase(eid, "ended")
-    # 新客户端：交卷 → 提示 → 关闭客户端（按选择决定是否清登录信息）
-    db.push_command("all", "force_exit",
-                    {"exam_id": eid, "clear_login": clear_login})
-    # 老客户端只认 stop：保留一条，保证老版本也至少能显示"考试已结束"
-    db.push_command("all", "stop", {"exam_id": eid})
+    ok, err = db.stop_exam(eid, clear_login)
+    if not ok:
+        flash(err, "err")
+        return redirect(url_for("index"))
     db.log("teacher", "info",
            f"结束考试 #{eid}「{ex['title']}」（强制交卷并关闭学生端"
            f"{'，清除登录信息' if clear_login else '，保留登录信息'}）")
@@ -3765,7 +4219,7 @@ def exam_typing_board_json(eid):
                  "remaining": db.phase_remaining(eid)},
         "task_order": enabled,
         "task_name": TYPING_TASK_NAME,
-        "rows": db.typing_board(eid),
+        "rows": db.typing_board(eid, _enabled_typing_tasks(ex)),
     })
 
 
@@ -3823,6 +4277,7 @@ def practice_bank():
 
 
 @app.route("/practice/<int:pid>/use", methods=["POST"])
+@_material_locked
 def practice_use(pid):
     """
     把这道题装进考试（**追加**，一场可以装多道）；
@@ -3882,6 +4337,7 @@ def exam_del_task(eid, pid):
 
 
 @app.route("/practice/<int:pid>/del", methods=["POST"])
+@_material_locked
 def practice_del(pid):
     db.delete_practice(pid)
     flash("已从实操题库删除")
@@ -4130,7 +4586,6 @@ def question_del(qid):
 
 @app.route("/questions/import", methods=["POST"])
 def questions_import():
-    db.invalidate()          # 题库变了，清缓存
     f = request.files.get("file")
     if not f or not f.filename:
         flash("请选择文件")
@@ -4140,40 +4595,26 @@ def questions_import():
                        (".json" if name.endswith(".json") else ".xlsx"))
     f.save(tmp)
     try:
+        if os.path.getsize(tmp) > QUESTION_IMPORT_MAX_BYTES:
+            raise ValueError(f"题库文件超过 {QUESTION_IMPORT_MAX_BYTES} 字节限制")
         if name.endswith(".json"):
             # JSON 导入（题库备份文件）
             with open(tmp, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             if not isinstance(data, list):
                 raise ValueError("JSON 格式应为题目数组")
-            items = []
-            for d in data:
-                qt = str(d.get("qtype", "")).strip().lower()
-                if qt not in ("single", "multi", "judge", "blank", "code",
-                              "drag"):
-                    continue
-                if not d.get("stem"):
-                    continue
-                items.append({
-                    "qtype": qt, "stem": d["stem"],
-                    "options": d.get("options") or [],
-                    "answer": str(d.get("answer", "")).strip(),
-                    "score": float(d.get("score", 2)),
-                    "category": d.get("category", ""),
-                    "language": d.get("language", ""),
-                    "code": d.get("code", ""),
-                    "stdin_data": d.get("stdin_data", ""),
-                    "expected_output": d.get("expected_output", ""),
-                    "difficulty": d.get("difficulty", ""),
-                    "source": d.get("source", ""),
-                    "slots": d.get("slots") or [],
-                })
+            items = _clean_question_import(data)
             ok, skip = db.import_questions(items)
+            if ok:
+                db.invalidate()
             flash(f"导入完成：新增 {ok} 题，跳过 {skip} 题")
         else:
             import import_excel
             items, skipped = import_excel.parse_excel(tmp)
+            _validate_question_import_budget(items)
             ok, skip = db.import_questions(items)
+            if ok:
+                db.invalidate()
             msg = f"导入完成：新增 {ok} 题，跳过 {skip} 题"
             if skipped:
                 msg += "（前几条：" + "；".join(
@@ -4306,7 +4747,7 @@ def scores_xlsx(eid):
     qs = db.get_exam_questions(eid)
     tasks = db.exam_tasks(eid)
     subs = db.list_submissions(eid)
-    typing = db.typing_board(eid)
+    typing = db.typing_board(eid, _enabled_typing_tasks(ex))
 
     wb = Workbook()
 
@@ -4316,12 +4757,13 @@ def scores_xlsx(eid):
     ws.append(["座位号", "姓名", "机器标识", "IP", "理论题", "理论满分",
                "实操题", "实操满分", "总分", "已交卷", "文件名"])
     for r in rows:
-        ws.append([r.get("seat", ""), r.get("name", ""), r["hostname"],
-                   r.get("ip", ""), r["theory"], r["theory_full"],
-                   r["practice"] if r["practice"] is not None else "",
-                   r["practice_full"], r["total"],
-                   "是" if r["submitted"] else "否",
-                   r.get("filename") or ""])
+        ws.append([_spreadsheet_value(value) for value in
+                   [r.get("seat", ""), r.get("name", ""), r["hostname"],
+                    r.get("ip", ""), r["theory"], r["theory_full"],
+                    r["practice"] if r["practice"] is not None else "",
+                    r["practice_full"], r["total"],
+                    "是" if r["submitted"] else "否",
+                    r.get("filename") or ""]])
     _style_head(ws, 11)
     _autosize(ws, [10, 14, 20, 14, 9, 9, 9, 9, 9, 9, 34])
 
@@ -4347,7 +4789,7 @@ def scores_xlsx(eid):
             got += float(sc or 0)
             line.append(("√ " if correct else "× ") + str(a))
         line += [round(got, 2), r["theory_full"]]
-        ws2.append(line)
+        ws2.append([_spreadsheet_value(value) for value in line])
     _style_head(ws2, len(head))
     _autosize(ws2, [10, 14, 20] + [16] * len(qs) + [10, 10])
 
@@ -4365,27 +4807,30 @@ def scores_xlsx(eid):
             for t in tasks:
                 s = group.get(t["id"])
                 if not s:
-                    ws3.append([r.get("seat", ""), r.get("name", ""),
-                                r["hostname"], t["name"],
-                                t.get("etype", ""), "未交", "", "", ""])
+                    ws3.append([_spreadsheet_value(value) for value in
+                                [r.get("seat", ""), r.get("name", ""),
+                                 r["hostname"], t["name"],
+                                 t.get("etype", ""), "未交", "", "", ""]])
                     continue
-                ws3.append([r.get("seat", ""), r.get("name", ""),
-                            r["hostname"], t["name"], t.get("etype", ""),
-                            s["score"] if s["score"] is not None else "评分中",
-                            s["full"],
-                            "缺卷" if (s.get("filename") or "").startswith("（缺卷")
-                            else "",
-                            s.get("filename") or ""])
+                ws3.append([_spreadsheet_value(value) for value in
+                            [r.get("seat", ""), r.get("name", ""),
+                             r["hostname"], t["name"], t.get("etype", ""),
+                             s["score"] if s["score"] is not None else "评分中",
+                             s["full"],
+                             "缺卷" if (s.get("filename") or "").startswith("（缺卷")
+                             else "",
+                             s.get("filename") or ""]])
         else:
             s = group.get(0)
             if s:
-                ws3.append([r.get("seat", ""), r.get("name", ""), r["hostname"],
-                            ex.get("title", "实操题"), ex.get("etype", ""),
-                            s["score"] if s["score"] is not None else "评分中",
-                            s["full"],
-                            "缺卷" if (s.get("filename") or "").startswith("（缺卷")
-                            else "",
-                            s.get("filename") or ""])
+                ws3.append([_spreadsheet_value(value) for value in
+                            [r.get("seat", ""), r.get("name", ""), r["hostname"],
+                             ex.get("title", "实操题"), ex.get("etype", ""),
+                             s["score"] if s["score"] is not None else "评分中",
+                             s["full"],
+                             "缺卷" if (s.get("filename") or "").startswith("（缺卷")
+                             else "",
+                             s.get("filename") or ""]])
     _style_head(ws3, 9)
     _autosize(ws3, [10, 14, 20, 26, 10, 9, 9, 10, 34])
 
@@ -4430,7 +4875,7 @@ def scores_xlsx(eid):
         overall = round(acc * 0.6 + speed_score * 0.4, 1)
         line += [int(done_n), len(TYPING_TASK_ORDER), round(sec_sum, 1),
                  round(acc, 1), round(wpm, 1), overall]
-        ws4.append(line)
+        ws4.append([_spreadsheet_value(value) for value in line])
     _style_head(ws4, 3 + len(TYPING_TASK_ORDER) + 6)
     _autosize(ws4, [10, 14, 20] + [30] * len(TYPING_TASK_ORDER) +
               [10, 10, 12, 14, 14, 14])
@@ -4438,8 +4883,7 @@ def scores_xlsx(eid):
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    safe = "".join(ch for ch in (ex["title"] or "考试")
-                   if ch not in r'\/:*?"<>|').strip() or "考试"
+    safe = _safe_name(ex["title"], "考试")
     return send_file(buf, as_attachment=True,
                      download_name=f"明细_{safe}.xlsx",
                      mimetype="application/vnd.openxmlformats-officedocument"
@@ -4462,7 +4906,8 @@ def scores_regrade(eid):
             if s["saved_path"] and os.path.isfile(s["saved_path"]):
                 # 多题考试按每道题各自的评分规则重评，别统一套 exams.checks
                 checks = db.checks_for_submission(ex, s)
-                enqueue_grade(s["id"], s["saved_path"], checks, s["hostname"])
+                enqueue_grade(s["id"], s["saved_path"], checks, s["hostname"],
+                              eid, purpose="regrade")
                 n += 1
         flash(f"已在后台重新评分 {n} 份，稍后刷新本页查看成绩" if n
               else "没有可评分的答卷")
@@ -4514,10 +4959,12 @@ def scores_zip(eid):
     if scope == "klass":
         klass = (ex.get("klass") or "").strip() or "未分班"
         code = (ex.get("code") or "").strip()
-        src = os.path.join(UPLOAD_DIR, "ikee_Exam", _safe_name(klass, "未分班"))
-        name = f"答卷_{klass}_{code or ('exam' + str(eid))}.zip"
+        safe_klass = _safe_name(klass, "未分班")
+        safe_code = _safe_name(code, f"exam{eid}")
+        src = os.path.join(UPLOAD_DIR, "ikee_Exam", safe_klass)
+        name = f"答卷_{safe_klass}_{safe_code}.zip"
         out = os.path.join(EXAM_DIR, name)
-        exm.collect_zip(eid, out, from_dir=src, exam_code=code, klass=klass)
+        exm.collect_zip(eid, out, from_dir=src, exam_code=safe_code, klass=safe_klass)
         db.log("teacher", "info", f"打包本班答卷 #{eid}：{name}")
         return send_file(out, as_attachment=True, download_name=name)
 
@@ -4810,7 +5257,7 @@ def exam_drawing_file(eid, host):
     if not d or not d.get("saved_path") or not os.path.isfile(d["saved_path"]):
         return "画图作品不存在（可能还没提交）", 404
     return send_file(d["saved_path"], as_attachment=False,
-                     download_name=d.get("filename") or "画板.png")
+                     download_name=_safe_name(d.get("filename"), "画板.png"))
 
 
 @app.route("/exam/<int:eid>/drawing/<path:host>/download")
@@ -4822,8 +5269,10 @@ def exam_drawing_download(eid, host):
         return "画图作品不存在（可能还没提交）", 404
     snap = db.participant_snapshot(eid, _drawing_req_participant()) or {}
     current = db.get_student(host) or {}
-    name = (snap.get("name") or current.get("name") or host).strip()
-    ext = os.path.splitext(d["saved_path"])[1] or ".png"
+    name = _safe_name(snap.get("name") or current.get("name") or host, "学生")
+    ext = os.path.splitext(d["saved_path"])[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+        ext = ".png"
     tag = "拼豆" if kind == "beads" else "画板"
     return send_file(d["saved_path"], as_attachment=True,
                      download_name=f"{name}_{tag}{ext}")
@@ -4838,7 +5287,7 @@ def submission_file(eid, sid):
             if not os.path.isfile(p):
                 return "答卷文件不存在（这题可能没做，或文件已被删除）", 404
             return send_file(p, as_attachment=True,
-                             download_name=s.get("filename") or "答卷")
+                             download_name=_safe_name(s.get("filename"), "答卷"))
     return "没有这份答卷", 404
 
 
@@ -4894,11 +5343,19 @@ def _q_img_html(s):
     其余文字照常转义，题库内容只有老师能录，风险可控。
     """
     from markupsafe import Markup, escape
+    from urllib.parse import quote
     s = str(s or "")
     out, last = [], 0
     for m in re.finditer(r"img:(\S+)(?:[ \t]+([^\n]*))?", s):
         out.append(escape(s[last:m.start()]))
-        out.append(Markup(f'<img src="/qimg/{m.group(1)}" '
+        filename = m.group(1)
+        try:
+            filename = material_name(filename)
+        except ValueError:
+            out.append(escape(m.group(0)))
+            last = m.end()
+            continue
+        out.append(Markup(f'<img src="/qimg/{quote(filename)}" '
                           f'style="max-height:110px;vertical-align:middle;'
                           f'margin:2px 8px;border-radius:4px" alt="图片">'))
         tail = (m.group(2) or "").strip()
@@ -5050,7 +5507,7 @@ def _review_payload(eid):
                   "seat": disp.get("seat") or "",
                   "wpm": 0.0, "acc": 0.0, "acc_n": 0,
                   "task_rows": [], "done_n": 0}
-    for row in db.typing_board(eid):
+    for row in db.typing_board(eid, _enabled_typing_tasks(ex)):
         h = row["hostname"]
         key = (row.get("participant_id") or 0, h)
         disp = students.get(key) or {}
@@ -5125,6 +5582,7 @@ def admin_api_exam_review(eid):
     payload = _review_payload(eid)
     if not payload:
         return _admin_fail("考试不存在", 404)
+    payload["ok"] = True
     return jsonify(payload)
 
 
@@ -5136,6 +5594,8 @@ def logs():
 @app.route("/admin_api/dashboard/students")
 def api_dashboard_students():
     """老师端自动刷新用：返回学生列表 JSON"""
+    if not _admin_ok():
+        return _admin_fail("未登录", 401)
     students = db.list_students()
     online = sum(1 for s in students if s["online"])
     submitted = sum(1 for s in students if s.get("status") == "submitted")
@@ -5186,10 +5646,7 @@ def students_page():
 @app.route("/students/clear", methods=["POST"])
 def students_clear():
     """清空学生机记录（POST + CSRF：破坏性操作不能被 GET 或一张图触发）"""
-    c = db.conn()
-    c.execute("DELETE FROM students")
-    c.commit()
-    c.close()
+    db.clear_students()
     flash("已清空所有学生机记录")
     return redirect(url_for("students_page"))
 
@@ -5252,6 +5709,24 @@ def exam_roster_del(eid, rid):
     return {"ok": True, "count": len(db.roster_of(eid))}
 
 
+@app.route("/students/<int:sid>/update", methods=["POST"])
+def student_update(sid):
+    c = db.conn()
+    row = c.execute("SELECT hostname FROM students WHERE id=?", (sid,)).fetchone()
+    c.close()
+    if not row:
+        flash("学生机不存在", "err")
+        return redirect(url_for("students_page"))
+    try:
+        _update_student_profile(row["hostname"], request.form.get("name"),
+                                request.form.get("seat"))
+    except (LookupError, ValueError) as exc:
+        flash(str(exc), "err")
+    else:
+        flash("学生信息已修改，学生端会同步更新")
+    return redirect(url_for("students_page"))
+
+
 @app.route("/students/<int:sid>/reset-token", methods=["POST"])
 def student_reset_token(sid):
     c = db.conn()
@@ -5296,10 +5771,15 @@ def exam_delete(eid):
 @app.route("/scores/<int:eid>/submission/<int:sid>/delete", methods=["POST"])
 def submission_delete(eid, sid):
     ex = db.get_exam(eid)
-    if ex and ex["status"] == "stopped":
+    if not ex:
+        flash("考试不存在", "err")
+        return redirect(url_for("index"))
+    if ex["status"] == "stopped":
         flash("已结束考试只能查看和导出，不能删除提交记录", "err")
         return redirect(url_for("scores", eid=eid))
-    db.delete_submission(sid)
+    if not db.delete_submission(sid, exam_id=eid):
+        flash("提交记录不存在或不属于本场考试", "err")
+        return redirect(url_for("scores", eid=eid))
     flash("已删除该提交记录")
     return redirect(url_for("scores", eid=eid))
 
@@ -5395,8 +5875,7 @@ def _exam_export_response(eid):
     if not data:
         return None
     ex = db.get_exam(eid)
-    safe = "".join(ch for ch in (ex["title"] or "考试")
-                   if ch not in r'\/:*?"<>|').strip() or "考试"
+    safe = _safe_name(ex["title"], "考试")
     return send_file(io.BytesIO(json.dumps(data, ensure_ascii=False, indent=2)
                                 .encode("utf-8")),
                      as_attachment=True, download_name=f"考试_{safe}.json",
@@ -5414,11 +5893,15 @@ def exam_export(eid):
 
 
 @app.route("/exams/import", methods=["POST"])
+@_material_locked
 def exams_import():
     """导入考试包 JSON（可一次选多个文件）"""
     files = request.files.getlist("files")
     if not files or not any(f.filename for f in files):
         flash("没选文件")
+        return redirect(url_for("index"))
+    if len(files) > 20:
+        flash("一次最多导入 20 个考试包")
         return redirect(url_for("index"))
     ok_n = 0
     msgs = []
@@ -5426,8 +5909,10 @@ def exams_import():
         if not f.filename:
             continue
         try:
-            raw = f.read().decode("utf-8")
-            data = json.loads(raw)
+            raw = f.read(QUESTION_IMPORT_MAX_BYTES + 1)
+            if len(raw) > QUESTION_IMPORT_MAX_BYTES:
+                raise ValueError("文件超过 16 MiB 限制")
+            data = json.loads(raw.decode("utf-8"))
         except Exception as e:
             msgs.append(f"{f.filename}: 解析失败 {e}")
             continue
@@ -5537,6 +6022,7 @@ if __name__ == "__main__":
         QIMG_DIR = runtime.QIMG_DIR
 
     db.init()          # 建表（要在数据目录确定之后）
+    _start_grading_workers()
     auth.ensure()      # 首次运行创建默认密码（auth 模块导入时也调用过，这里兜底）
 
     SERVER_NAME = a.name

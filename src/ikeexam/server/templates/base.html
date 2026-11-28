@@ -163,8 +163,9 @@ th{background:var(--lavender);font-weight:800;color:var(--navy);
    border-bottom:2px solid var(--navy);white-space:nowrap;font-size:.75rem;
    letter-spacing:.3px}
 tr:last-child td{border-bottom:none}
-.score-table thead th{position:sticky;top:76px;z-index:5;background:var(--lavender);
+.score-table thead th{position:sticky;top:var(--nav-h,76px);z-index:5;background:var(--lavender);
                       box-shadow:0 2px 0 var(--navy)}
+.table-scroll{width:100%;overflow:auto}
 /* 行悬停高亮。
    ⚠️ 原来写的是 tbody tr:hover —— 但模板里的 <tr> 大多直接挂在 <table> 下，
       没有 <tbody>，浏览器不会给它们套 tbody 选择器，所以 14 张表里只有
@@ -175,8 +176,7 @@ table tr.is-offline{background:var(--cream)}
 table tr.is-offline td{color:var(--text-muted)}
 /* 表格在窄屏（平板/小窗口）横向滚动，而不是撑破卡片布局 */
 @media (max-width:900px){
-  .card{overflow-x:auto}
-  .card table{min-width:max-content}
+  .table-scroll table{min-width:max-content}
 }
 td.mono,.mono{font-family:var(--mono);font-size:.75rem}
 
@@ -440,7 +440,7 @@ ul.tips{margin:8px 0 8px 20px;font-size:.8125rem;color:var(--ink-2);line-height:
   .card{padding:18px}
   h1{font-size:1.5rem}
   .page-head{align-items:flex-start}
-  .score-table thead th{top:68px}
+  .score-table thead th{top:var(--nav-h,76px)}
   .geo-triangle{left:1vw;width:40px}
 }
 @media (max-width:600px){
@@ -595,7 +595,11 @@ var ExamChart = (function () {
   function empty(id, msg) {
     var el = document.getElementById(id);
     if (!el) return;
-    el.innerHTML = '<div class="nodata">' + (msg || '暂无数据') + '</div>';
+    el.textContent = '';
+    var emptyNode = document.createElement('div');
+    emptyNode.className = 'nodata';
+    emptyNode.textContent = msg || '暂无数据';
+    el.appendChild(emptyNode);
   }
 
   function render(id, option, isEmpty, emptyMsg) {
@@ -625,7 +629,7 @@ var ExamChart = (function () {
       if (!total) { empty(id, opt.emptyMsg); return; }
       var o = base(id);
       o.tooltip = { trigger: 'axis', axisPointer: { type: 'shadow' },
-                    formatter: opt.formatter };
+                    renderMode: 'richText', formatter: opt.formatter };
       var series = {
         type: 'bar',
         name: opt.name || '人数',
@@ -767,6 +771,17 @@ document.addEventListener('submit', function (e) {
   i.type = 'hidden'; i.name = '_csrf'; i.value = '{{ csrf_token }}';
   f.appendChild(i);
 }, true);
+</script>
+<script>
+(function () {
+  function syncNavHeight() {
+    var nav = document.querySelector('.nav');
+    if (nav) document.documentElement.style.setProperty(
+      '--nav-h', Math.ceil(nav.getBoundingClientRect().height) + 'px');
+  }
+  window.addEventListener('resize', syncNavHeight);
+  syncNavHeight();
+})();
 </script>
 <footer style="position:relative;z-index:1;text-align:center;padding:22px 12px;
                 color:var(--text-muted);font-size:12px;border-top:2px solid var(--navy);

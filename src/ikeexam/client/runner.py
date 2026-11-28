@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import shutil
+import time
 
 IS_WIN = os.name == "nt"
 
@@ -30,6 +31,7 @@ TIMEOUT_RUN = 8
 
 # 输出上限（字符），防止 while True: print() 把内存吃光
 MAX_OUT = 8000
+MAX_OUT_BYTES = MAX_OUT * 4
 
 # 候选命令（按顺序尝试）
 PY_CMDS = ["python", "python3", "py"]
@@ -156,6 +158,7 @@ def detect():
 
 def _run(cmd, cwd, timeout, stdin_data="", env=None):
     """执行一条命令，返回结果 dict"""
+    out_file = err_file = None
     try:
         kw = {}
         if IS_WIN:
@@ -166,36 +169,75 @@ def _run(cmd, cwd, timeout, stdin_data="", env=None):
             kw["start_new_session"] = True
         if env:
             kw["env"] = env
+        out_file = tempfile.TemporaryFile(mode="w+b")
+        err_file = tempfile.TemporaryFile(mode="w+b")
         p = subprocess.Popen(
             cmd, cwd=cwd,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True,
-            encoding="utf-8", errors="replace", **kw)
+            stdin=subprocess.PIPE, stdout=out_file,
+            stderr=err_file, **kw)
+        timed_out = False
+        overflow = False
         try:
-            out, err = p.communicate(input=stdin_data or "", timeout=timeout)
-            rc = p.returncode
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            _kill_tree(p)
+            if stdin_data:
+                p.stdin.write(str(stdin_data).encode("utf-8"))
+            p.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+        deadline = time.monotonic() + timeout
+        while True:
             try:
-                out, err = p.communicate(timeout=3)
-            except Exception:
-                out, err = "", ""
-            rc = None
-            timed_out = True
+                rc = p.wait(timeout=0.05)
+                break
+            except subprocess.TimeoutExpired:
+                size = os.fstat(out_file.fileno()).st_size + os.fstat(err_file.fileno()).st_size
+                if size > MAX_OUT_BYTES:
+                    overflow = True
+                    _kill_tree(p)
+                    try:
+                        rc = p.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        rc = None
+                    break
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    _kill_tree(p)
+                    try:
+                        rc = p.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        rc = None
+                    break
+        if not timed_out and not overflow:
+            size = os.fstat(out_file.fileno()).st_size + os.fstat(err_file.fileno()).st_size
+            if size > MAX_OUT_BYTES:
+                overflow = True
+
+        def read_output(stream):
+            stream.seek(0)
+            return stream.read(MAX_OUT_BYTES + 1).decode("utf-8", "replace")[:MAX_OUT]
+
+        out = read_output(out_file)
+        err = read_output(err_file)
     except FileNotFoundError:
         return {"ok": False, "msg": f"找不到命令: {cmd[0]}", "out": "", "err": ""}
     except Exception as e:
         return {"ok": False, "msg": f"执行失败: {e}", "out": "", "err": ""}
+    finally:
+        for stream in (out_file, err_file):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
 
-    out = (out or "")[:MAX_OUT]
-    err = (err or "")[:MAX_OUT]
     if timed_out:
         err = (err + f"\n[超时] 运行超过 {timeout} 秒，已强制终止").strip()
+    elif overflow:
+        err = (err + "\n[输出超过限制] 已强制终止").strip()
     return {
-        "ok": (rc == 0) and not timed_out,
+        "ok": (rc == 0) and not timed_out and not overflow,
         "rc": rc, "out": out, "err": err, "timed_out": timed_out,
-        "msg": "" if rc == 0 else (err or f"退出码 {rc}"),
+        "overflow": overflow,
+        "msg": "" if rc == 0 and not timed_out and not overflow else (err or f"退出码 {rc}"),
     }
 
 

@@ -24,6 +24,10 @@ PROJECT_ROOT = os.path.dirname(SRC_DIR)
 sys.path.insert(0, TEACHER_DIR)
 sys.path.insert(0, SRC_DIR)
 
+from ikeexam.shared.security import (MAX_TEACHER_JSON_BYTES, atomic_json,
+                                     normalize_origin, open_verified, origin_key,
+                                     path_identity, read_limited)
+
 from ikeexam.shared import ui_theme
 ui_theme.enable_high_dpi()
 import tkinter as tk
@@ -82,6 +86,11 @@ STATUS_NAMES = {
     "draft": "未开始", "running": "进行中", "paused": "已暂停",
     "stopped": "已结束", "idle": "未开始",
 }
+STATUS_ICONS = {"draft": "○", "running": "▶", "paused": "Ⅱ",
+                "stopped": "■", "idle": "○", "unknown": "•"}
+STATUS_COLORS = {"draft": "#6D5BD0", "running": "#168A4A",
+                 "paused": "#A86B00", "stopped": "#5F6B7D",
+                 "idle": "#6D5BD0", "unknown": "#5F6B7D"}
 PHASE_NAMES = {"theory": "理论阶段", "practice": "实操阶段",
                "ended": "已结束", "idle": "—", "running": "—"}
 STUDENT_STATUS = {"idle": "空闲", "working": "作答中", "submitted": "已交卷"}
@@ -90,28 +99,47 @@ OFFICE_NAMES = {"word": "Word", "excel": "Excel", "ppt": "PowerPoint",
 
 
 def load_server():
+    default = "http://127.0.0.1:9000"
     try:
-        with open(_CONFIG, "r", encoding="utf-8") as fileobj:
-            return (json.load(fileobj) or {}).get("server", "127.0.0.1:9000")
+        with open(_CONFIG, "rb") as fileobj:
+            payload = json.loads(read_limited(fileobj, MAX_TEACHER_JSON_BYTES).decode("utf-8"))
+        server = normalize_origin(payload.get("server") or default,
+                                  allow_plain_http=True)
+        approved = {origin_key(value, allow_plain_http=True)
+                    for value in payload.get("approved_origins") or []}
+        if (origin_key(server, allow_plain_http=True) in approved
+                or origin_key(server, allow_plain_http=True)
+                == origin_key(default, allow_plain_http=True)):
+            return server
     except Exception:
-        return "127.0.0.1:9000"
+        pass
+    return default
 
 
 def save_server(addr):
     try:
-        with open(_CONFIG, "w", encoding="utf-8") as fileobj:
-            json.dump({"server": addr}, fileobj, ensure_ascii=False, indent=2)
+        server = normalize_origin(addr, allow_plain_http=True)
+        payload = {}
+        try:
+            with open(_CONFIG, "rb") as fileobj:
+                payload = json.loads(read_limited(fileobj, MAX_TEACHER_JSON_BYTES).decode("utf-8"))
+        except Exception:
+            pass
+        approved = payload.get("approved_origins") or []
+        key = origin_key(server, allow_plain_http=True)
+        if not isinstance(approved, list):
+            approved = []
+        approved = [value for value in approved
+                    if origin_key(value, allow_plain_http=True) != key][:16]
+        approved.append(key)
+        atomic_json(_CONFIG, {"server": server, "approved_origins": approved},
+                    MAX_TEACHER_JSON_BYTES)
     except Exception:
         pass
 
 
 def norm_base(addr):
-    value = (addr or "").strip()
-    if not value:
-        return ""
-    if not value.startswith(("http://", "https://")):
-        value = "http://" + value
-    return value.rstrip("/")
+    return normalize_origin(addr, allow_plain_http=True)
 
 
 def open_site(event=None):
@@ -180,6 +208,96 @@ def show_about(parent):
     ui_theme.apply_to_tk(win, getattr(parent, "_ui_tokens", _UI))
     win.grab_set()
     return win
+
+
+class ChangePasswordDialog:
+    """修改管理密码；成功后所有旧会话失效并返回登录页。"""
+
+    def __init__(self, parent, app):
+        self.app = app
+        self.win = tk.Toplevel(parent)
+        self.win.title("修改密码")
+        self.win.configure(bg=CARD)
+        self.win.resizable(False, False)
+        self.win.transient(parent)
+        self.win.bind("<Escape>", lambda event: self.win.destroy())
+        icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.ico")
+        if os.path.isfile(icon):
+            self.win.iconbitmap(icon)
+
+        card = tk.Frame(self.win, bg=CARD, padx=28, pady=24)
+        card.pack(fill="both", expand=True)
+        tk.Label(card, text="修改管理密码", bg=CARD, fg=INK,
+                 font=(FONT, 17, "bold")).pack(pady=(0, 16))
+        self.entries = []
+        for label in ("原密码", "新密码", "确认新密码"):
+            tk.Label(card, text=label, bg=CARD, fg=INK,
+                     font=(FONT, 11)).pack(anchor="w", pady=(0, 4))
+            entry = tk.Entry(card, font=(FONT, 12), width=30, show="•",
+                             relief="solid", bd=1)
+            entry.pack(fill="x", ipady=7, pady=(0, 12))
+            self.entries.append(entry)
+        tk.Label(card, text="新密码至少 6 位；修改后需要重新登录。", bg=CARD,
+                 fg=GRAY, font=(FONT, 9)).pack(anchor="w")
+        self.tip = tk.Label(card, text="", bg=CARD, fg=RED, font=(FONT, 10),
+                            wraplength=340, justify="left")
+        self.tip.pack(fill="x", pady=(10, 8))
+        bar = tk.Frame(card, bg=CARD)
+        bar.pack()
+        self.confirm_btn = tk.Button(
+            bar, text="确认修改", command=self.submit, bg=BLUE, fg="white",
+            font=(FONT, 11, "bold"), relief="flat", cursor="hand2",
+            padx=18, pady=7, activebackground=BLUE_D)
+        self.confirm_btn.pack(side="left", padx=4)
+        self.cancel_btn = tk.Button(
+            bar, text="取消", command=self.win.destroy, bg=CARD, fg=GRAY,
+            font=(FONT, 11), relief="flat", cursor="hand2", padx=18, pady=7)
+        self.cancel_btn.pack(side="left", padx=4)
+        self.entries[0].bind("<Return>", lambda event: self.entries[1].focus())
+        self.entries[1].bind("<Return>", lambda event: self.entries[2].focus())
+        self.entries[2].bind("<Return>", lambda event: self.submit())
+        self.win.update_idletasks()
+        x = parent.winfo_rootx() + max(0, (parent.winfo_width() - self.win.winfo_width()) // 2)
+        y = parent.winfo_rooty() + max(0, (parent.winfo_height() - self.win.winfo_height()) // 2)
+        self.win.geometry(f"+{x}+{y}")
+        ui_theme.apply_to_tk(self.win, getattr(parent, "_ui_tokens", _UI))
+        self.win.grab_set()
+        self.entries[0].focus_set()
+
+    def submit(self):
+        old, new, confirm = [entry.get().strip() for entry in self.entries]
+        if not old:
+            self.tip.config(text="请输入原密码", fg=RED)
+            self.entries[0].focus_set()
+            return
+        if len(new) < 6:
+            self.tip.config(text="新密码至少 6 位", fg=RED)
+            self.entries[1].focus_set()
+            return
+        if new != confirm:
+            self.tip.config(text="两次输入的新密码不一致", fg=RED)
+            self.entries[2].focus_set()
+            return
+
+        def done(result):
+            if result.get("status") == 401:
+                self.win.destroy()
+                self.app.api.discard_session()
+                self.app._build_login("登录状态已失效，请重新登录。")
+                return
+            if not result.get("ok"):
+                self.tip.config(text=result.get("msg") or "修改密码失败", fg=RED)
+                return
+            mb.showinfo("修改成功", "密码已修改，请使用新密码重新登录。",
+                        parent=self.win)
+            self.win.destroy()
+            self.app._build_login("密码已修改，请使用新密码重新登录。")
+
+        self.app.task(
+            lambda: self.app.api.change_password(old, new, confirm), done,
+            error=lambda exc: self.tip.config(text=f"修改密码失败：{exc}", fg=RED),
+            controls=(*self.entries, self.confirm_btn, self.cancel_btn),
+            status=self.tip, busy_text="正在修改密码…")
 
 
 def as_list(value):
@@ -616,6 +734,7 @@ class LoginWindow:
             widget.destroy()
         self.root.title(f"{APP_NAME} · 老师端登录")
         self.root.minsize(680, 520)
+        self.root.resizable(True, True)
         ui_theme.maximize_window(self.root)
         self.root.configure(bg=BG)
         banner = ui_theme.MemphisBanner(
@@ -623,35 +742,36 @@ class LoginWindow:
             tokens=getattr(self.app, "ui_tokens", _UI))
         banner.pack(fill="x")
 
-        card = tk.Frame(self.root, bg=CARD, padx=48, pady=34,
-                        highlightbackground=LINE, highlightthickness=2)
-        card.place(relx=0.5, rely=0.56, anchor="center")
-        tk.Label(card, text="老师端登录", bg=CARD, font=(FONT, 20, "bold"),
+        self.card = tk.Frame(self.root, bg=CARD, padx=48, pady=34,
+                             highlightbackground=LINE, highlightthickness=2)
+        self.card.pack_propagate(False)
+        self.card.place(relx=0.5, rely=0.56, anchor="center", width=560, height=680)
+        tk.Label(self.card, text="老师端登录", bg=CARD, font=(FONT, 20, "bold"),
                  fg=INK).pack(pady=(0, 18))
 
-        tk.Label(card, text="服务器地址", bg=CARD, fg=INK,
+        tk.Label(self.card, text="服务器地址", bg=CARD, fg=INK,
                  font=(FONT, 11)).pack(anchor="w")
-        self.e_server = tk.Entry(card, font=(FONT, 12), width=32)
+        self.e_server = tk.Entry(self.card, font=(FONT, 12), width=32)
         self.e_server.pack(fill="x", ipady=7, pady=(6, 14))
         self.e_server.insert(0, load_server())
 
-        tk.Label(card, text="管理密码", bg=CARD, fg=INK,
+        tk.Label(self.card, text="管理密码", bg=CARD, fg=INK,
                  font=(FONT, 11)).pack(anchor="w")
-        self.e_pwd = tk.Entry(card, font=(FONT, 12), width=32, show="•")
+        self.e_pwd = tk.Entry(self.card, font=(FONT, 12), width=32, show="•")
         self.e_pwd.pack(fill="x", ipady=7, pady=(6, 12))
 
-        self.tip = tk.Label(card, text="正在检查本机服务…", bg=CARD, fg=GRAY,
-                            font=(FONT, 9), wraplength=340, justify="left")
+        self.tip = tk.Label(self.card, text="正在检查本机服务…", bg=CARD, fg=GRAY,
+                            font=(FONT, 9), height=3, wraplength=340, justify="left")
         self.checked_base = None
         self.login_notice = ""
-        self.tip.pack(pady=(0, 8))
-        self.btn = tk.Button(card, text="连 接 并 登 录", command=self._connect,
+        self.tip.pack(fill="x", pady=(0, 8))
+        self.btn = tk.Button(self.card, text="连 接 并 登 录", command=self._connect,
                              bg=BLUE, fg="white", font=(FONT, 11, "bold"),
                              relief="flat", cursor="hand2",
                              activebackground=BLUE_D, pady=10, state="disabled")
         self.btn.pack(fill="x")
 
-        bar = tk.Frame(card, bg=CARD)
+        bar = tk.Frame(self.card, bg=CARD)
         bar.pack(pady=(10, 0))
         tk.Button(bar, text="关于本软件", command=lambda: show_about(self.root),
                   bg=CARD, fg=GRAY, font=(FONT, 9), relief="flat",
@@ -659,7 +779,7 @@ class LoginWindow:
         self.e_pwd.bind("<Return>", lambda event: self._connect())
         self.e_server.bind("<Return>", lambda event: self._connect())
         self.e_server.bind("<FocusOut>", lambda event: self.app._schedule_login_startup())
-        ui_theme.add_hard_shadow(card, 6, LINE)
+        ui_theme.add_hard_shadow(self.card, 6, LINE)
         self.signature = signature_label(self.root, BG)
         self.signature.pack(side="bottom", anchor="e", padx=12, pady=5)
         self.signature.lift()
@@ -668,7 +788,11 @@ class LoginWindow:
         if self.app.busy:
             self.tip.configure(text="请等待当前操作完成…", foreground=ORANGE)
             return
-        base = norm_base(self.e_server.get())
+        try:
+            base = norm_base(self.e_server.get())
+        except ValueError as exc:
+            self.tip.configure(text=str(exc), foreground=RED)
+            return
         if not base:
             self.tip.configure(text="请填写服务器地址", foreground=RED)
             return
@@ -729,39 +853,54 @@ class MainWindow:
         ui_theme.maximize_window(self.root)
         self.root.configure(bg=BG)
 
-        banner = ui_theme.MemphisBanner(
-            self.root, title=APP_NAME, subtitle="老师端 · 考务控制台", height=82,
-            tokens=getattr(self.app, "ui_tokens", _UI))
-        banner.pack(fill="x")
+        ui_theme.apply_theme(self.root, base_size=11)
+        self.root.configure(bg=BG)
 
-        top = tk.Frame(self.root, bg=_UI["mint"], highlightbackground=LINE,
-                       highlightthickness=2)
-        top.pack(fill="x")
+        header = tk.Frame(self.root, bg=BG)
+        self.header = header
+        header.pack(fill="x")
+        banner = ui_theme.MemphisBanner(
+            header, title=APP_NAME, subtitle="老师端 · 考务控制台", height=72,
+            title_size=23, subtitle_size=12,
+            tokens=getattr(self.app, "ui_tokens", _UI))
+        self.banner = banner
+        banner.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        controls = tk.Frame(header, bg=_UI["mint"], highlightbackground=LINE,
+                            highlightthickness=2)
+        controls.pack(side="right", fill="y")
         self.server_label = tk.Label(
-            top, text="", bg=_UI["mint"], fg=INK, font=(FONT, 9, "bold"))
-        self.server_label.pack(side="left", padx=14, pady=6)
+            controls, text="", bg=_UI["mint"], fg=INK, font=(FONT, 11, "bold"),
+            padx=14, pady=10)
+        self.server_label.pack(side="left", fill="x", expand=True)
         try:
             host = urlsplit(self.api.base).netloc or self.api.base
         except Exception:
             host = self.api.base
         self.server_label.configure(text=f"已连接 · {host}")
-        bar = tk.Frame(top, bg=_UI["mint"])
+        bar = tk.Frame(controls, bg=_UI["mint"])
         bar.pack(side="right", padx=8)
         self.about_btn = tk.Button(
             bar, text="关于", command=lambda: show_about(self.root),
-            bg=_UI["lavender"], fg=INK, font=(FONT, 9, "bold"),
-            relief="solid", bd=2, cursor="hand2",
+            bg=_UI["lavender"], fg=INK, font=(FONT, 11, "bold"),
+            relief="solid", bd=2, cursor="hand2", padx=12, pady=8,
             activebackground=_UI["yellow"])
         self.about_btn.pack(side="left", padx=2)
+        self.password_btn = tk.Button(
+            bar, text="修改密码", command=self.change_password,
+            bg=_UI["yellow"], fg=INK, font=(FONT, 11, "bold"),
+            relief="solid", bd=2, cursor="hand2", padx=12, pady=8,
+            activebackground=_UI["mint"])
+        self.password_btn.pack(side="left", padx=2)
         self.logout_btn = tk.Button(
             bar, text="退出登录", command=self.logout, bg=_UI["coral"], fg=INK,
-            font=(FONT, 9, "bold"), relief="solid", bd=2, cursor="hand2",
-            activebackground=_UI["yellow"])
+            font=(FONT, 11, "bold"), relief="solid", bd=2, cursor="hand2",
+            padx=12, pady=8, activebackground=_UI["yellow"])
         self.logout_btn.pack(side="left", padx=2)
 
         self.notebook = ttk.Notebook(self.root, style="Main.TNotebook")
         self.notebook.enable_traversal()
-        self.notebook.pack(fill="both", expand=True, padx=16, pady=(14, 8))
+        self.notebook.pack(fill="both", expand=True, padx=16, pady=(8, 6))
         self.exam_page = ExamManager(self)
         self.question_page = QuestionBank(self)
         self.practice_page = PracticeBank(self)
@@ -777,14 +916,14 @@ class MainWindow:
                           highlightthickness=2)
         bottom.pack(fill="x", side="bottom")
         self.status = tk.Label(bottom, text="就绪", anchor="w", bg=CARD,
-                               fg=GRAY, font=(FONT, 9), padx=12, pady=6)
+                               fg=GRAY, font=(FONT, 10), padx=12, pady=5)
         self.status.pack(side="left", fill="x", expand=True)
         self.signature = signature_label(bottom, CARD)
         self.signature.pack(side="right", padx=12, pady=6)
         self.refresh_all()
 
     def all_controls(self):
-        controls = [self.logout_btn]
+        controls = [self.password_btn, self.logout_btn]
         for page in self.pages:
             controls.extend(page.action_controls())
         return controls
@@ -856,15 +995,10 @@ class MainWindow:
             return
 
         def work():
-            result = self.api.export_exam(eid, fmt)
+            result = self.api.export_exam(eid, fmt, output_path=path)
             if not result.get("ok"):
                 return result
-            try:
-                with open(path, "wb") as fileobj:
-                    fileobj.write(result.get("data") or result.get("content") or b"")
-            except OSError as exc:
-                return {"ok": False, "msg": f"保存导出文件失败：{exc}"}
-            return {"ok": True, "path": path,
+            return {"ok": True, "path": result.get("path", path),
                     "size": result.get("size", 0)}
 
         def success(result):
@@ -877,6 +1011,12 @@ class MainWindow:
                 self.show_failure(result, "导出失败")
 
         self.task(work, success, busy_text=f"正在导出 {fmt.upper()} 文件…")
+
+    def change_password(self):
+        if self.app.busy:
+            self.status.configure(text="请等待当前操作完成…", foreground=ORANGE)
+            return
+        self.password_dialog = ChangePasswordDialog(self.root, self.app)
 
     def logout(self):
         if self.app.busy:
@@ -913,10 +1053,14 @@ class ExamManager(PageBase):
     def __init__(self, main):
         super().__init__(main, "考试管理")
         self.exams = []
+        self._drag_select = None
         self._build()
         self.tree.bind("<<TreeviewSelect>>", lambda event: self._update_buttons())
         self.tree.bind("<Double-1>", lambda event: self._double_click(event))
         self.tree.bind("<Button-3>", lambda event: self._context_menu(event))
+        self.tree.bind("<ButtonPress-1>", self._begin_drag_select, add="+")
+        self.tree.bind("<B1-Motion>", self._drag_select_rows, add="+")
+        self.tree.bind("<ButtonRelease-1>", self._end_drag_select, add="+")
 
     def _build(self):
         info = ttk.Frame(self)
@@ -931,16 +1075,6 @@ class ExamManager(PageBase):
         self.btn_new = self.add_action(make_button(
             row1, "新建考试", self._new, accent=True))
         self.btn_new.pack(side="left", padx=(0, 4))
-        self.btn_edit = self.add_action(make_button(row1, "编辑配置", self._edit))
-        self.btn_edit.pack(side="left", padx=4)
-        self.btn_delete = self.add_action(make_button(row1, "删除", self._delete))
-        self.btn_delete.pack(side="left", padx=4)
-        self.btn_scores = self.add_action(make_button(row1, "查看成绩", self._scores))
-        self.btn_scores.pack(side="left", padx=4)
-        self.btn_review = self.add_action(make_button(row1, "试卷评讲", self._review))
-        self.btn_review.pack(side="left", padx=4)
-        self.btn_charts = self.add_action(make_button(row1, "成绩图表", self._charts))
-        self.btn_charts.pack(side="left", padx=4)
         self.export_var = tk.StringVar(value="csv")
         self.export_box = ttk.Combobox(row1, textvariable=self.export_var,
                                        values=("json", "csv", "xlsx", "zip"),
@@ -973,24 +1107,32 @@ class ExamManager(PageBase):
         holder, self.tree = make_tree(
             self, ("id", "code", "title", "klass", "duration", "status", "phase"),
             ("ID", "考试编号", "考试名称", "班级", "时长", "状态", "阶段"),
-            (42, 148, 245, 90, 78, 72, 76), stretch="title", height=12,
+            (50, 150, 250, 120, 90, 100, 100), stretch="title", height=12,
             selectmode="extended")
+        for column in ("id", "duration", "status", "phase"):
+            self.tree.column(column, anchor="center")
         holder.grid(row=3, column=0, sticky="nsew")
+        for key, color in STATUS_COLORS.items():
+            self.tree.tag_configure(f"status-{key}", foreground=color)
 
     def set_data(self, data):
         self.exams = list(data.get("exams") or [])
         selected = self.tree.selection()
         selected_id = selected[0] if selected else None
         self.tree.delete(*self.tree.get_children())
-        for exam in self.exams:
+        for index, exam in enumerate(self.exams):
             eid = str(exam.get("id"))
             duration = exam.get("duration")
+            status = exam.get("status") or "draft"
+            status_key = status if status in STATUS_ICONS else "unknown"
+            status_text = f"{STATUS_ICONS[status_key]} {STATUS_NAMES.get(status, status)}"
+            tags = (f"status-{status_key}", "odd") if index % 2 else (f"status-{status_key}",)
             self.tree.insert(
-                "", "end", iid=eid,
+                "", "end", iid=eid, tags=tags,
                 values=(eid, exam.get("code") or "—", exam.get("title") or "",
                         exam.get("klass") or "未分班",
                         f"{duration} 分钟" if duration is not None else "—",
-                        STATUS_NAMES.get(exam.get("status"), exam.get("status") or "—"),
+                        status_text,
                         PHASE_NAMES.get(exam.get("phase"), exam.get("phase") or "—")))
         if selected_id and self.tree.exists(selected_id):
             self.tree.selection_set(selected_id)
@@ -1015,15 +1157,42 @@ class ExamManager(PageBase):
             mb.showinfo("提示", "请先在列表中选择一场考试", parent=self.main.root)
         return exam
 
+    def _begin_drag_select(self, event):
+        if event.state & (0x0001 | 0x0004):
+            return None
+        row = self.tree.identify_row(event.y)
+        rows = list(self.tree.get_children())
+        if not row or row not in rows:
+            return None
+        self._drag_select = {"anchor": row, "rows": rows}
+        self.tree.selection_set(row)
+        self.tree.focus(row)
+        return "break"
+
+    def _drag_select_rows(self, event):
+        if not self._drag_select:
+            return None
+        row = self.tree.identify_row(event.y)
+        rows = self._drag_select["rows"]
+        if not row or row not in rows:
+            return "break"
+        start = rows.index(self._drag_select["anchor"])
+        end = rows.index(row)
+        lo, hi = sorted((start, end))
+        self.tree.selection_set(rows[lo:hi + 1])
+        self.tree.focus(row)
+        return "break"
+
+    def _end_drag_select(self, event=None):
+        self._drag_select = None
+        return None
+
     def _update_buttons(self):
         exam = self._selected()
         active = bool(exam and exam.get("status") in ("running", "paused"))
         status = exam.get("status") if exam else None
         states = {
-            "new": True, "edit": exam is not None, "scores": exam is not None,
-            "review": exam is not None, "charts": exam is not None,
-            "delete": exam is not None and status == "draft",
-            "export": exam is not None, "refresh": True,
+            "export": exam is not None,
             "start": exam is not None and status == "draft",
             "pause": status == "running", "resume": status == "paused",
             "stop": active, "regrade": exam is not None and status != "stopped",
@@ -1031,11 +1200,6 @@ class ExamManager(PageBase):
         }
         for key, widget in self.buttons.items():
             widget.configure(state="normal" if states[key] else "disabled")
-        self.btn_edit.configure(state="normal" if status == "draft" else "disabled")
-        self.btn_scores.configure(state="normal" if exam else "disabled")
-        self.btn_review.configure(state="normal" if exam else "disabled")
-        self.btn_charts.configure(state="normal" if exam else "disabled")
-        self.btn_delete.configure(state="normal" if states["delete"] else "disabled")
         self.btn_export.configure(state="normal" if exam else "disabled")
 
     def _new(self):
@@ -1069,13 +1233,15 @@ class ExamManager(PageBase):
 
     def _context_menu(self, event):
         row = self.tree.identify_row(event.y)
+        menu = tk.Menu(self.tree, tearoff=0)
         if not row:
+            menu.add_command(label="新建考试", command=self._new)
+            menu.tk_popup(event.x_root, event.y_root)
             return
         self.tree.selection_set(row)
         exam = self._selected()
         if not exam:
             return
-        menu = tk.Menu(self.tree, tearoff=0)
         menu.add_command(label="编辑配置", command=self._edit,
                          state="disabled" if exam.get("status") in ("running", "paused", "stopped") else "normal")
         menu.add_command(label="复制考试", command=self._copy)
@@ -1128,9 +1294,12 @@ class ExamManager(PageBase):
         exam = self._require_selected()
         if not exam or self.app.busy:
             return
-        klass = ClassPrompt(self.main.root, exam.get("klass") or "").result
-        if klass is None:
+        prompt = ClassPrompt(
+            self.main.root, exam.get("klass") or "",
+            bool(exam.get("passwordless")))
+        if prompt.result is None:
             return
+        klass, passwordless = prompt.result
         eid = exam["id"]
 
         def success(result):
@@ -1141,7 +1310,7 @@ class ExamManager(PageBase):
             else:
                 self.main.show_failure(result, "开始失败")
 
-        self.main.task(lambda: self.api.start_exam(eid, klass), success,
+        self.main.task(lambda: self.api.start_exam(eid, klass, passwordless), success,
                        controls=self.action_controls(), busy_text="正在开始考试…")
 
     def _simple_action(self, title, api_call, success_text, confirm=None):
@@ -1254,7 +1423,7 @@ class ExamManager(PageBase):
             return
         ids = [int(item) for item in self.tree.selection() if str(item).isdigit()]
         if not ids:
-            mb.showinfo("批量导出", "请先勾选多场考试，可按住 Ctrl 或 Shift 多选。",
+            mb.showinfo("批量导出", "请先选择多场考试，可按住左键拖拽多选，也可按住 Ctrl 或 Shift 多选。",
                         parent=self.main.root)
             return
         desktop = os.path.join(os.path.expanduser("~"), "Desktop")
@@ -1267,12 +1436,10 @@ class ExamManager(PageBase):
             return
 
         def work():
-            result = self.api.export_exams(ids)
+            result = self.api.export_exams(ids, output_path=path)
             if not result.get("ok"):
                 return result
-            with open(path, "wb") as fileobj:
-                fileobj.write(result.get("data") or result.get("content") or b"")
-            return {"ok": True, "path": path}
+            return {"ok": True, "path": result.get("path", path)}
 
         def success(result):
             if result.get("ok"):
@@ -1331,7 +1498,7 @@ class ExamManager(PageBase):
 
 
 class ClassPrompt:
-    def __init__(self, parent, klass=""):
+    def __init__(self, parent, klass="", passwordless=False):
         self.result = None
         self.top = tk.Toplevel(parent)
         self.top.title("开始考试")
@@ -1344,6 +1511,10 @@ class ClassPrompt:
         self.var = tk.StringVar(value=klass)
         entry = ttk.Entry(frame, textvariable=self.var, width=30)
         entry.pack(fill="x", pady=10)
+        self.passwordless_var = tk.BooleanVar(value=passwordless)
+        ttk.Checkbutton(
+            frame, text="免密码考试：按 IP 自动识别，学生无需填写姓名和座位",
+            variable=self.passwordless_var).pack(anchor="w", pady=(0, 10))
         entry.focus_set()
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x")
@@ -1360,7 +1531,7 @@ class ClassPrompt:
         if not value:
             mb.showwarning("提示", "班级不能为空", parent=self.top)
             return
-        self.result = value
+        self.result = (value, bool(self.passwordless_var.get()))
         self.top.destroy()
 
 
@@ -1414,11 +1585,12 @@ class ExamEditor:
         self.checked_materials = set()
         self.checks_data = []
         self.pending_uploads = []
+        self._upload_identities = {}
         self._baseline = None
         self._saved_qids = []
         self._saved_pids = []
         self._active_tab = None
-        self._tab_guard = False
+        self._selection_save_timer = None
         self._selection_frames = set()
         self.office_types = ["word"]
         self.top = tk.Toplevel(self.main.root)
@@ -1461,7 +1633,7 @@ class ExamEditor:
         text = lambda widget: widget.get("1.0", "end").strip()
         return (
             self.name_var.get(), self.duration_var.get(), self.klass_var.get(),
-            bool(self.require_var.get()), bool(self.passwordless_var.get()),
+            bool(self.require_var.get()),
             tuple(sorted(self.type_vars)), tuple(self.type_vars[k].get()
                                                  for k in sorted(self.type_vars)),
             text(self.requirement_text), text(self.finish_text),
@@ -1477,14 +1649,9 @@ class ExamEditor:
         if not self.locked:
             self.footer_tip.configure(text="Ctrl+S 保存 · Esc 关闭", foreground=GRAY)
 
-    def _selection_dirty(self):
-        return (tuple(self.selected_qids) != tuple(self._saved_qids) or
-                tuple(self.selected_pids) != tuple(self._saved_pids))
-
     def _has_unsaved_changes(self):
-        return (self._selection_dirty() or
-                (self._baseline is not None and
-                 self._state_signature() != self._baseline))
+        return (self._baseline is not None and
+                self._state_signature() != self._baseline)
 
     def _entry(self, parent, **kwargs):
         return self._control(ttk.Entry(parent, **kwargs))
@@ -1498,7 +1665,7 @@ class ExamEditor:
 
     def _text(self, parent, height=4, width=80):
         return self._control(scrolledtext.ScrolledText(
-            parent, height=height, width=width, wrap="word", font=(FONT, 9),
+            parent, height=height, width=width, wrap="word", font=(FONT, 10),
             background=CARD, foreground=INK, relief="solid", borderwidth=1))
 
     def _build(self):
@@ -1519,7 +1686,7 @@ class ExamEditor:
                                  bordercolor=LINE, borderwidth=0)
         notebook_style.configure(
             "Exam.TNotebook.Tab", background=_UI["lemon"], foreground=INK,
-            padding=(14, 9), font=(FONT, 9, "bold"), borderwidth=2,
+            padding=(10, 8), font=(FONT, 11, "bold"), borderwidth=2,
             bordercolor=LINE, lightcolor=LINE, darkcolor=LINE)
         notebook_style.map(
             "Exam.TNotebook.Tab",
@@ -1532,13 +1699,15 @@ class ExamEditor:
         self.notebook.enable_traversal()
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         self.notebook.grid(row=1, column=0, sticky="nsew")
-        self._build_basic(ttk.Frame(self.notebook, padding=10))
+        self.basic_scroll = ScrollableFrame(self.notebook)
+        self._build_basic(self.basic_scroll.inner)
+        self.basic_scroll._bind_wheel()
         self._build_question_pages()
-        self._build_practice(ttk.Frame(self.notebook, padding=8))
-        self._build_typing(ttk.Frame(self.notebook, padding=10))
-        self._build_drawing(ttk.Frame(self.notebook, padding=10))
-        self._build_roster(ttk.Frame(self.notebook, padding=8))
-        self._build_overview(ttk.Frame(self.notebook, padding=10))
+        self._build_practice(ttk.Frame(self.notebook, style="Surface.TFrame", padding=10))
+        self._build_typing(ttk.Frame(self.notebook, style="Surface.TFrame", padding=12))
+        self._build_drawing(ttk.Frame(self.notebook, style="Surface.TFrame", padding=12))
+        self._build_roster(ttk.Frame(self.notebook, style="Surface.TFrame", padding=12))
+        self._build_overview(ttk.Frame(self.notebook, style="Surface.TFrame", padding=12))
         for widget in (self.requirement_text, self.finish_text, self.roster_text):
             widget.bind("<KeyRelease>", lambda event: self._note_dirty())
             ui_theme.bind_mousewheel(widget, widget)
@@ -1549,10 +1718,6 @@ class ExamEditor:
         footer.columnconfigure(0, weight=1)
         self.footer_tip = ttk.Label(footer, text="", style="Muted.TLabel")
         self.footer_tip.grid(row=0, column=0, sticky="w")
-        self.btn_back_basic = self._button(footer, "返回基本设置",
-                                           lambda: self.notebook.select(self.basic_frame))
-        self.btn_save_selection = self._button(footer, "保存选题",
-                                               self._save_active, accent=True)
         self.btn_cancel = self._button(footer, "取消", self._close)
         self.btn_save = self._button(footer, "保存考试", self._save, accent=True)
         self._active_tab = self.notebook.select()
@@ -1560,21 +1725,23 @@ class ExamEditor:
 
     def _build_basic(self, frame):
         self.basic_frame = frame
-        self.notebook.add(frame, text="基本设置")
+        self.notebook.add(self.basic_scroll, text="基本设置")
         frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(4, weight=0)
+        frame.columnconfigure(5, weight=1)
         self.name_var = tk.StringVar()
         self.duration_var = tk.StringVar(value="60")
         self.klass_var = tk.StringVar()
         self.require_var = tk.BooleanVar(value=False)
-        self.passwordless_var = tk.BooleanVar(value=False)
         self.type_vars = {key: tk.BooleanVar(value=False)
                           for key, _label in EXAM_TYPES}
         for variable in self.type_vars.values():
             variable.trace_add("write", lambda *args: (
                 self._on_type_changed(), self._note_dirty()))
-        for variable in (self.name_var, self.duration_var, self.klass_var,
-                         self.require_var, self.passwordless_var):
+        for variable in (self.name_var, self.klass_var, self.require_var):
             variable.trace_add("write", lambda *args: self._note_dirty())
+        self.duration_var.trace_add("write", lambda *args: (
+            self._note_dirty(), self._render_overview()))
 
         self.name_entry = self._entry(frame, textvariable=self.name_var)
         ttk.Label(frame, text="考试名称").grid(row=0, column=0, sticky="w",
@@ -1593,13 +1760,10 @@ class ExamEditor:
         self.klass_entry = self._entry(frame, textvariable=self.klass_var)
         self.klass_entry.grid(row=2, column=1, columnspan=3, sticky="ew", pady=4)
         self.require_check = self._check(frame, "未做完禁止提交", self.require_var)
-        self.require_check.grid(row=3, column=0, columnspan=2, sticky="w", pady=4)
-        self._check(frame, "免密码考试（学生不填姓名/座位，按 IP 识别）",
-                    self.passwordless_var).grid(
-                        row=3, column=2, columnspan=2, sticky="w", pady=4)
+        self.require_check.grid(row=3, column=0, columnspan=4, sticky="w", pady=4)
 
         types = ttk.LabelFrame(frame, text="本场考试题型（全部页签常驻）")
-        types.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(6, 4))
+        types.grid(row=4, column=0, columnspan=6, sticky="ew", pady=(6, 4))
         for column in range(3):
             types.columnconfigure(column, weight=1)
         for index, (key, label) in enumerate(EXAM_TYPES):
@@ -1611,21 +1775,39 @@ class ExamEditor:
         ttk.Label(frame, text="实操要求 / 说明").grid(row=5, column=0,
                                                       sticky="w", pady=(6, 2))
         self.requirement_text = self._text(frame, 3)
-        self.requirement_text.grid(row=6, column=0, columnspan=4, sticky="ew")
+        self.requirement_text.grid(row=6, column=0, columnspan=6, sticky="ew")
         ttk.Label(frame, text="交卷结束语").grid(row=7, column=0,
                                                   sticky="w", pady=(6, 2))
         self.finish_text = self._text(frame, 3)
-        self.finish_text.grid(row=8, column=0, columnspan=4, sticky="ew")
+        self.finish_text.grid(row=8, column=0, columnspan=6, sticky="ew")
         ttk.Label(frame, text="提示：所有题型页签都会显示，带 ✓ 的才发给学生；"
                   "取消勾选不会删除已选题目。答卷文件名由系统按座位号/姓名自动生成。",
                   style="Muted.TLabel", wraplength=1000).grid(
-                      row=9, column=0, columnspan=4, sticky="w", pady=(6, 0))
+                      row=9, column=0, columnspan=6, sticky="w", pady=(6, 0))
+
+        summary = ttk.LabelFrame(frame, text="考试概览", style="Card.TLabelframe",
+                                 padding=12)
+        summary.grid(row=0, column=4, rowspan=4, columnspan=2,
+                     sticky="nsew", padx=(16, 0))
+        self.basic_summary = {}
+        for index, (key, label) in enumerate((
+                ("theory", "理论题"), ("practice", "实操题"),
+                ("total", "总分"), ("duration", "时长"))):
+            column = index % 2
+            row = index // 2
+            ttk.Label(summary, text=label, style="Muted.TLabel").grid(
+                row=row, column=column * 2, sticky="w", padx=(0, 8), pady=4)
+            value = tk.StringVar(value="—")
+            self.basic_summary[key] = value
+            ttk.Label(summary, textvariable=value, font=(FONT, 12, "bold")).grid(
+                row=row, column=column * 2 + 1, sticky="w", padx=(0, 18), pady=4)
+            summary.columnconfigure(column * 2 + 1, weight=1)
 
     def _build_question_pages(self):
         self.q_pages = {}
         sort_values = ("选题顺序", "ID 升序", "分类名称", "分值降序", "分值升序")
         for key, label in QTYPES:
-            frame = ttk.Frame(self.notebook, padding=8)
+            frame = ttk.Frame(self.notebook, style="Surface.TFrame", padding=10)
             self.notebook.add(frame, text=label)
             self._selection_frames.add(str(frame))
             frame.rowconfigure(2, weight=1)
@@ -1779,9 +1961,52 @@ class ExamEditor:
         frame.rowconfigure(1, weight=1)
         ttk.Label(frame, text="画板题配置", font=(FONT, 11, "bold")).grid(
             row=0, column=0, sticky="w", pady=(0, 6))
-        self.drawing_editor = DrawingConfigEditor(frame, on_change=self._note_dirty)
-        self.drawing_editor.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        body = ttk.Frame(frame)
+        body.grid(row=1, column=0, sticky="nsew")
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        self.drawing_editor = DrawingConfigEditor(body, on_change=self._note_dirty)
+        self.drawing_editor.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
         self.controls.extend(self.drawing_editor.controls)
+
+        preview = ttk.LabelFrame(body, text="学生端预览", style="Card.TLabelframe",
+                                 padding=14)
+        preview.grid(row=0, column=1, sticky="nsew")
+        self.drawing_preview = tk.Canvas(preview, height=240, bg=CARD,
+                                         highlightthickness=0)
+        self.drawing_preview.pack(fill="both", expand=True)
+        ttk.Label(preview, text="画板与拼豆只统计创作过程，不计入考试总分。",
+                  style="Muted.TLabel", justify="center").pack(pady=(10, 0))
+
+        def draw_preview(event=None):
+            canvas = self.drawing_preview
+            canvas.delete("all")
+            width = max(canvas.winfo_width(), 420)
+            height = max(canvas.winfo_height(), 220)
+            card_w = (width - 48) / 2
+            for index, (title, color) in enumerate((
+                    ("画板创作", _UI["sky"]), ("拼豆题", _UI["lemon"]))):
+                x = 16 + index * (card_w + 16)
+                canvas.create_rectangle(x, 16, x + card_w, height - 34,
+                                        fill=color, outline=LINE, width=2)
+                canvas.create_text(x + card_w / 2, 48, text=title,
+                                   fill=INK, font=(FONT, 13, "bold"))
+                if index == 0:
+                    canvas.create_line(x + 54, 116, x + card_w - 54, 116,
+                                       fill=BLUE, width=5)
+                    canvas.create_oval(x + card_w / 2 - 14, 98,
+                                       x + card_w / 2 + 14, 126,
+                                       fill=_UI["coral"], outline=LINE, width=2)
+                else:
+                    size = 18
+                    for row in range(3):
+                        for column in range(4):
+                            cx = x + 42 + column * (size + 8)
+                            cy = 90 + row * (size + 8)
+                            canvas.create_oval(cx, cy, cx + size, cy + size,
+                                               fill=_UI["purple"], outline=LINE, width=1)
+        self.drawing_preview.bind("<Configure>", draw_preview)
+        draw_preview()
 
     def _build_roster(self, frame):
         self.notebook.add(frame, text="名单与素材")
@@ -1792,7 +2017,7 @@ class ExamEditor:
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         left.rowconfigure(1, weight=1)
         left.columnconfigure(0, weight=1)
-        ttk.Label(left, text="一行一个学生：姓名,座位,IP；免密码考试可只填 IP。"
+        ttk.Label(left, text="一行一个学生：姓名,座位,IP；开考时可按 IP 自动识别。"
                   "也支持空格或 | 分隔。",
                   style="Muted.TLabel", wraplength=360).grid(
                       row=0, column=0, sticky="w")
@@ -1890,6 +2115,15 @@ class ExamEditor:
         self.overview_detail.configure(
             text=f"理论 {theory_count} 道 · 实操 {practice_count} 道 · "
                  f"共 {theory_count + practice_count} 道")
+        if hasattr(self, "basic_summary"):
+            self.basic_summary["theory"].set(f"{theory_count} 道")
+            self.basic_summary["practice"].set(f"{practice_count} 道")
+            self.basic_summary["total"].set(f"{total:g} 分")
+            try:
+                minutes = int(float(self.duration_var.get()))
+            except (TypeError, ValueError):
+                minutes = 0
+            self.basic_summary["duration"].set(f"{minutes} 分钟" if minutes else "—")
 
     def _remove_overview_selected(self):
         if self.locked:
@@ -1908,7 +2142,7 @@ class ExamEditor:
             self.selected_pids.remove(item_id)
             self._render_practice()
         self._render_overview()
-        self._note_dirty()
+        self._queue_selection_save("practice" if kind == "p" else "questions")
 
     def _on_type_changed(self):
         if hasattr(self, "q_pages"):
@@ -1938,34 +2172,17 @@ class ExamEditor:
                 self.notebook.tab(frame, text=("✓ " if enabled else "") + label + suffix)
 
     def _on_tab_changed(self, event=None):
-        if self._tab_guard or not hasattr(self, "notebook"):
+        if not hasattr(self, "notebook"):
             return
-        new_tab = self.notebook.select()
-        old_tab = self._active_tab
-        if (old_tab and new_tab and old_tab != new_tab and
-                old_tab in self._selection_frames and
-                new_tab in self._selection_frames and self._selection_dirty()):
-            self._tab_guard = True
-            self.notebook.select(old_tab)
-            self._tab_guard = False
-            mb.showwarning("选题尚未保存",
-                           "请先点击底部「保存选题」，再切换其他题型。",
-                           parent=self.top)
-            return
-        self._active_tab = new_tab
+        self._active_tab = self.notebook.select()
         self._update_footer()
 
     def _update_footer(self):
         if not hasattr(self, "btn_save"):
             return
-        for button in (self.btn_back_basic, self.btn_save_selection,
-                       self.btn_cancel, self.btn_save):
+        for button in (self.btn_cancel, self.btn_save):
             button.grid_remove()
-        selection_page = self._active_tab in self._selection_frames
-        if selection_page:
-            self.btn_back_basic.grid(row=0, column=1, padx=(8, 0))
-            self.btn_save_selection.grid(row=0, column=2)
-        else:
+        if self._active_tab not in self._selection_frames:
             self.btn_cancel.grid(row=0, column=2)
             self.btn_save.grid(row=0, column=1, padx=(0, 8))
 
@@ -1976,6 +2193,34 @@ class ExamEditor:
             self._apply_questions()
         else:
             self._save()
+
+    def _queue_selection_save(self, kind):
+        if self.locked:
+            return
+        self._cancel_selection_save()
+        self.footer_tip.configure(text="选题已更改，正在自动保存…", foreground=ORANGE)
+        self._selection_save_timer = self.top.after(
+            250, lambda: self._auto_save_selection(kind))
+
+    def _auto_save_selection(self, kind):
+        self._selection_save_timer = None
+        if self.app.busy:
+            self._selection_save_timer = self.top.after(
+                500, lambda: self._auto_save_selection(kind))
+            return
+        if kind == "practice":
+            self._apply_practice()
+        else:
+            self._apply_questions()
+
+    def _cancel_selection_save(self):
+        if self._selection_save_timer is None:
+            return
+        try:
+            self.top.after_cancel(self._selection_save_timer)
+        except tk.TclError:
+            pass
+        self._selection_save_timer = None
 
     def _sync_practice_types(self):
         if not hasattr(self, "p_type_combo"):
@@ -2039,7 +2284,6 @@ class ExamEditor:
         self.office_types = [key for key in ("word", "excel", "ppt")
                              if key in office_types] or ["word"]
         self.require_var.set(bool(exam.get("require_complete")))
-        self.passwordless_var.set(bool(exam.get("passwordless")))
         selected = set(as_list(exam.get("question_types")))
         if not selected:
             selected = {key for key, _label in EXAM_TYPES if key != "basic"}
@@ -2183,7 +2427,7 @@ class ExamEditor:
         else:
             self.selected_qids.append(qid)
         self._render_question_page(key)
-        self._note_dirty()
+        self._queue_selection_save("questions")
 
     def _select_visible(self, key, choose):
         if self.locked:
@@ -2197,7 +2441,7 @@ class ExamEditor:
             self.selected_qids = [qid for qid in self.selected_qids
                                   if qid not in set(visible_ids)]
         self._render_question_page(key)
-        self._note_dirty()
+        self._queue_selection_save("questions")
 
     def _random_questions(self, key):
         if self.locked:
@@ -2219,11 +2463,11 @@ class ExamEditor:
             mb.showinfo("随机抽题", "没有符合分类条件的未选题目。", parent=self.top)
             return
         self.selected_qids.extend(int(question["id"]) for question in picked)
-        self._note_dirty()
         page["sort"].set("选题顺序")
         self._render_question_page(key)
+        self._queue_selection_save("questions")
         self.footer_tip.configure(
-            text=f"已随机抽取 {len(picked)} 道{QTYPE_NAMES[key]}，请点击「保存选题」",
+            text=f"已随机抽取 {len(picked)} 道{QTYPE_NAMES[key]}，正在自动保存",
             foreground=GREEN)
 
     def _sort_selected_questions(self, key):
@@ -2252,8 +2496,8 @@ class ExamEditor:
             self.selected_qids[index] = qid
         page["sort"].set("选题顺序")
         self._render_question_page(key)
-        self._note_dirty()
-        self.footer_tip.configure(text="已按当前规则重排本题型", foreground=GREEN)
+        self._queue_selection_save("questions")
+        self.footer_tip.configure(text="已按当前规则重排本题型，正在自动保存", foreground=GREEN)
 
     def _move_selected_question(self, key, delta):
         if self.locked:
@@ -2279,7 +2523,7 @@ class ExamEditor:
         page["sort"].set("选题顺序")
         self._render_question_page(key)
         page["selected_tree"].selection_set(str(qid))
-        self._note_dirty()
+        self._queue_selection_save("questions")
 
     def _remove_selected_question(self, key):
         if self.locked:
@@ -2293,7 +2537,7 @@ class ExamEditor:
         if qid in self.selected_qids:
             self.selected_qids.remove(qid)
         self._render_question_page(key)
-        self._note_dirty()
+        self._queue_selection_save("questions")
 
     @staticmethod
     def _practice_level_rank(value):
@@ -2367,7 +2611,7 @@ class ExamEditor:
         else:
             self.selected_pids.append(pid)
         self._render_practice()
-        self._note_dirty()
+        self._queue_selection_save("practice")
 
     def _select_visible_practice(self, choose):
         if self.locked:
@@ -2381,7 +2625,7 @@ class ExamEditor:
             self.selected_pids = [pid for pid in self.selected_pids
                                   if pid not in set(visible_ids)]
         self._render_practice()
-        self._note_dirty()
+        self._queue_selection_save("practice")
 
     def _move_selected_practice(self, delta):
         if self.locked:
@@ -2402,16 +2646,15 @@ class ExamEditor:
             self.selected_pids[target], self.selected_pids[index]
         self._render_practice()
         self.p_tree.selection_set(str(pid))
-        self._note_dirty()
-        self.footer_tip.configure(text="实操题顺序已调整", foreground=GREEN)
+        self._queue_selection_save("practice")
+        self.footer_tip.configure(text="实操题顺序已调整，正在自动保存", foreground=GREEN)
 
     def _apply_questions(self):
         if self.locked or self.app.busy:
             return
         if self.eid is None:
-            mb.showinfo("保存选题", "首次保存会同时保存考试配置，完成后可继续选题。",
-                        parent=self.top)
-            self._save(close_after=False)
+            self.footer_tip.configure(
+                text="请先保存考试，之后选择题型会自动保存", foreground=ORANGE)
             return
         eid = self.eid
         ids = list(self.selected_qids)
@@ -2419,24 +2662,22 @@ class ExamEditor:
         def success(result):
             if result.get("ok"):
                 self._saved_qids = ids
-                self.footer_tip.configure(
-                    text="理论选题已保存" if not self._has_unsaved_changes()
-                    else "理论选题已保存 · 其他设置仍有未保存修改",
-                    foreground=GREEN if not self._has_unsaved_changes() else ORANGE)
+                self.footer_tip.configure(text="选题已自动保存", foreground=GREEN)
             else:
-                self.main.show_failure(result, "保存选题失败")
+                self.selected_qids = list(self._saved_qids)
+                self._render_all_questions()
+                self.main.show_failure(result, "自动保存选题失败")
 
         self.main.task(lambda: self.api.set_exam_questions(eid, ids), success,
                        controls=self.controls,
-                       busy_text="正在保存理论选题…")
+                       busy_text="正在自动保存选题…")
 
     def _apply_practice(self):
         if self.locked or self.app.busy:
             return
         if self.eid is None:
-            mb.showinfo("保存选题", "首次保存会同时保存考试配置，完成后可继续选题。",
-                        parent=self.top)
-            self._save(close_after=False)
+            self.footer_tip.configure(
+                text="请先保存考试，之后选择题型会自动保存", foreground=ORANGE)
             return
         eid = self.eid
         ids = list(self.selected_pids)
@@ -2444,16 +2685,15 @@ class ExamEditor:
         def success(result):
             if result.get("ok"):
                 self._saved_pids = ids
-                self.footer_tip.configure(
-                    text="实操选题已保存" if not self._has_unsaved_changes()
-                    else "实操选题已保存 · 其他设置仍有未保存修改",
-                    foreground=GREEN if not self._has_unsaved_changes() else ORANGE)
+                self.footer_tip.configure(text="选题已自动保存", foreground=GREEN)
             else:
-                self.main.show_failure(result, "保存选题失败")
+                self.selected_pids = list(self._saved_pids)
+                self._render_practice()
+                self.main.show_failure(result, "自动保存实操选题失败")
 
         self.main.task(lambda: self.api.set_exam_practice(eid, ids), success,
                        controls=self.controls,
-                       busy_text="正在保存实操选题…")
+                       busy_text="正在自动保存实操选题…")
 
     def _import_student_ips(self):
         if self.locked:
@@ -2566,6 +2806,12 @@ class ExamEditor:
                         "*.png *.jpg *.jpeg"), ("所有文件", "*.*")])
         if not path:
             return
+        try:
+            selected_identity = path_identity(path)
+        except (OSError, ValueError) as exc:
+            mb.showerror("素材文件无效", str(exc), parent=self.top)
+            return
+        self._upload_identities[path] = selected_identity
         name = os.path.basename(path)
         if name in self.materials or any(os.path.basename(p) == name
                                          for p in self.pending_uploads):
@@ -2586,7 +2832,8 @@ class ExamEditor:
             else:
                 self.main.show_failure(result, "素材上传失败")
 
-        self.main.task(lambda: self.api.upload_material(eid, path), success,
+        self.main.task(lambda: self.api.upload_material(
+            eid, path, self._upload_identities.get(path)), success,
                        controls=self.controls, busy_text="正在上传素材…")
 
     def _delete_material(self):
@@ -2680,7 +2927,6 @@ class ExamEditor:
             "requirement": self.requirement_text.get("1.0", "end").strip(),
             "finish_note": self.finish_text.get("1.0", "end").strip(),
             "require_complete": bool(self.require_var.get()),
-            "passwordless": bool(self.passwordless_var.get()),
             "question_types": question_types,
             "question_ids": list(self.selected_qids),
             "practice_ids": list(self.selected_pids),
@@ -2694,6 +2940,7 @@ class ExamEditor:
     def _save(self, close_after=True):
         if self.locked or self.app.busy:
             return
+        self._cancel_selection_save()
         try:
             payload = self._payload()
         except ValueError as exc:
@@ -2711,7 +2958,8 @@ class ExamEditor:
                 uploaded = 0
                 uploaded_materials = list(payload.get("materials") or [])
                 for path in pending:
-                    result = self.api.upload_material(created_id, path)
+                    result = self.api.upload_material(
+                        created_id, path, self._upload_identities.get(path))
                     if not result.get("ok"):
                         return {"ok": False, "eid": created_id,
                                 "uploaded": uploaded,
@@ -2767,6 +3015,7 @@ class ExamEditor:
         if self.app.busy:
             mb.showinfo("请稍候", "当前操作尚未完成。", parent=self.top)
             return
+        self._cancel_selection_save()
         if self._has_unsaved_changes():
             if not mb.askyesno(
                     "尚未保存", "当前考试配置有未保存修改，确定放弃并关闭吗？",
@@ -2896,18 +3145,24 @@ class QuestionBank(PageBase):
             filetypes=[("JSON 文件", "*.json"), ("所有文件", "*.*")])
         if not path:
             return
+        try:
+            selected_identity = path_identity(path)
+        except (OSError, ValueError) as exc:
+            mb.showerror("JSON 文件无效", str(exc), parent=self.main.root)
+            return
 
         def work():
             try:
-                with open(path, "r", encoding="utf-8-sig") as fileobj:
-                    payload = json.load(fileobj)
+                with open_verified(path, selected_identity, "rb") as fileobj:
+                    payload = json.loads(read_limited(
+                        fileobj, MAX_TEACHER_JSON_BYTES).decode("utf-8-sig"))
             except Exception as exc:
                 return {"ok": False, "msg": f"读取 JSON 失败：{exc}"}
             if isinstance(payload, dict):
                 payload = payload.get("items", payload.get("questions"))
-            if not isinstance(payload, list):
+            if not isinstance(payload, list) or len(payload) > 10000:
                 return {"ok": False,
-                        "msg": "JSON 顶层必须是题目数组，或包含 items/questions 数组"}
+                        "msg": "JSON 题目数量无效（最多 10000 题）"}
             return self.api.import_questions(payload)
 
         def success(result):
@@ -2973,7 +3228,7 @@ class QuestionEditor:
 
     def _text(self, parent, height):
         widget = scrolledtext.ScrolledText(parent, height=height, width=44,
-                                           wrap="word", font=(FONT, 9), background=CARD,
+                                           wrap="word", font=(FONT, 10), background=CARD,
                                            foreground=INK, relief="solid",
                                            borderwidth=1)
         self.controls.append(widget)
@@ -3411,14 +3666,14 @@ class PracticeEditor:
 
         ttk.Label(outer, text="考试要求").grid(row=2, column=0, sticky="w")
         self.requirement = scrolledtext.ScrolledText(
-            outer, height=3, wrap="word", font=(FONT, 9), background=CARD,
+            outer, height=3, wrap="word", font=(FONT, 10), background=CARD,
             foreground=INK, relief="solid", borderwidth=1)
         self.requirement.grid(row=3, column=0, sticky="nsew", pady=(3, 6))
         self.controls.append(self.requirement)
         ttk.Label(outer, text="素材文件名（每行一个）").grid(
             row=4, column=0, sticky="w")
         self.materials = scrolledtext.ScrolledText(
-            outer, height=2, wrap="word", font=(FONT, 9), background=CARD,
+            outer, height=2, wrap="word", font=(FONT, 10), background=CARD,
             foreground=INK, relief="solid", borderwidth=1)
         self.materials.grid(row=5, column=0, sticky="nsew", pady=(3, 6))
         self.controls.append(self.materials)
@@ -3505,6 +3760,43 @@ class PracticeEditor:
         self.top.destroy()
 
 
+class StudentEditPrompt:
+    def __init__(self, parent, student):
+        self.result = None
+        self.top = tk.Toplevel(parent)
+        self.top.title("修改学生信息")
+        self.top.transient(parent)
+        self.top.resizable(False, False)
+        self.top.geometry("420x250")
+        self.top.configure(bg=BG)
+        frame = ttk.Frame(self.top, padding=18)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=f"机器标识：{student.get('hostname') or ''}").pack(anchor="w")
+        ttk.Label(frame, text="姓名").pack(anchor="w", pady=(12, 3))
+        self.name_var = tk.StringVar(value=student.get("name") or "")
+        self.name_entry = ttk.Entry(frame, textvariable=self.name_var)
+        self.name_entry.pack(fill="x", ipady=6)
+        ttk.Label(frame, text="座位号").pack(anchor="w", pady=(10, 3))
+        self.seat_var = tk.StringVar(value=student.get("seat") or "")
+        ttk.Entry(frame, textvariable=self.seat_var).pack(fill="x", ipady=6)
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(16, 0))
+        make_button(buttons, "取消", self.top.destroy).pack(side="right")
+        make_button(buttons, "保存", self._ok, accent=True).pack(side="right", padx=(0, 8))
+        self.name_entry.focus_set()
+        self.top.bind("<Escape>", lambda event: self.top.destroy())
+        parent.wait_window(self.top)
+
+    def _ok(self):
+        name = self.name_var.get().strip()
+        seat = self.seat_var.get().strip()
+        if not name:
+            mb.showwarning("提示", "姓名不能为空", parent=self.top)
+            return
+        self.result = (name, seat)
+        self.top.destroy()
+
+
 class StudentManager(PageBase):
     def __init__(self, main):
         super().__init__(main, "学生机")
@@ -3555,12 +3847,17 @@ class StudentManager(PageBase):
         current = int(progress.get("current_question") or 0)
         total = int(progress.get("question_total") or 0)
         answered = int(progress.get("theory_answered") or 0)
+        current_task = str(progress.get("current_task") or "")[:40]
         if current and total:
-            return f"第 {current}/{total} 题 · 已答 {answered}/{total}"
+            text = f"第 {current}/{total} 题 · 已答 {answered}/{total}"
+            return f"{text} · {current_task}" if current_task else text
         practice_index = int(progress.get("practice_index") or 0)
         practice_total = int(progress.get("practice_total") or 0)
         if practice_index and practice_total:
-            return f"实操第 {practice_index}/{practice_total} 题"
+            text = f"实操第 {practice_index}/{practice_total} 题"
+            return f"{text} · {current_task}" if current_task else text
+        if current_task:
+            return current_task
         section = progress.get("section") or ""
         if section in ("typing", "drawing"):
             return "打字练习中" if section == "typing" else "画板创作中"
@@ -3610,10 +3907,31 @@ class StudentManager(PageBase):
         self.tree.selection_set(row)
         menu = tk.Menu(self.tree, tearoff=0)
         menu.add_command(label="查看详情", command=self._details)
+        menu.add_command(label="修改学生信息", command=self._edit_student)
         menu.add_command(label="重置机器凭证", command=self._reset)
         menu.add_separator()
         menu.add_command(label="刷新学生机", command=self.main.refresh_all)
         menu.tk_popup(event.x_root, event.y_root)
+
+    def _edit_student(self):
+        student = self._selected()
+        if not student or self.app.busy:
+            return
+        prompt = StudentEditPrompt(self.main.root, student)
+        if prompt.result is None:
+            return
+        name, seat = prompt.result
+        hostname = student.get("hostname") or ""
+
+        def success(result):
+            if result.get("ok"):
+                self.main.after_change(f"已修改 {hostname} 的学生信息")
+            else:
+                self.main.show_failure(result, "修改学生信息失败")
+
+        self.main.task(lambda: self.api.update_student(hostname, name, seat), success,
+                       controls=self.action_controls(),
+                       busy_text="正在修改学生信息…")
 
     def _reset(self):
         student = self._selected()

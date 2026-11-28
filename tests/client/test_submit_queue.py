@@ -2,6 +2,7 @@
 """学生端交卷重试策略回归。"""
 import os
 import sys
+from types import SimpleNamespace
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "src", "ikeexam", "client"))
@@ -10,7 +11,8 @@ from gui import SubmitQueue
 
 
 def main():
-    queue = SubmitQueue()
+    client = SimpleNamespace(generation=1, identity="student")
+    queue = SubmitQueue(client)
     attempts = {"count": 0}
 
     def flaky():
@@ -29,7 +31,7 @@ def main():
     assert attempts["count"] == 3
     assert len(done[1]) == 1 and not done[2]
 
-    queue = SubmitQueue()
+    queue = SubmitQueue(client)
     attempts = {"count": 0}
 
     def rejected():
@@ -45,6 +47,16 @@ def main():
             done = event
     assert attempts["count"] == 3
     assert not done[1] and len(done[2]) == 1
+
+    queue = SubmitQueue(client)
+    queue.add("未作答题", lambda: None)
+    events = queue.start()
+    done = None
+    while done is None:
+        event = events.get(timeout=10)
+        if event[0] == "done":
+            done = event
+    assert done[1] == [] and done[2] == []
     print("[OK] 交卷异常与接口失败都会重试三次后才上报结果")
 
 

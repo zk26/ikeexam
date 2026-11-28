@@ -34,6 +34,20 @@ sys.path.insert(0, os.path.join(ROOT, "server"))
 EXTS = {"word": ".docx", "excel": ".xlsx", "ppt": ".pptx"}
 HIGH_DEFAULT = 0.90      # 高度可疑
 WARN_DEFAULT = 0.75      # 值得关注
+MAX_SUBMISSIONS = 200
+MAX_PAIRS = 5000
+MAX_TEXT_CHARS = 200000
+MAX_TOTAL_TEXT_CHARS = 8000000
+MAX_PAIR_TEXT_CHARS = 200000
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def csv_safe_value(value):
+    if not isinstance(value, str):
+        return value
+    if value.lstrip().startswith(CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
 
 # 判定文案：纯文字，不带 emoji。
 # 这些值会出现在网页表格和导出的 CSV 里 —— emoji 在 CSV（WPS 打开）里
@@ -47,8 +61,19 @@ VERDICT = {
 
 
 # ==================== 指纹提取 ====================
+def _validate_document(path):
+    import zipfile
+    try:
+        from ikeexam.graders.base import validate_ooxml
+    except ImportError:
+        from graders.base import validate_ooxml
+    with zipfile.ZipFile(path) as archive:
+        validate_ooxml(archive)
+
+
 def fp_word(path):
     """WPS文字：文本 + 结构"""
+    _validate_document(path)
     from docx import Document
     doc = Document(path)
     paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
@@ -79,8 +104,9 @@ def fp_word(path):
 
 def fp_excel(path):
     """WPS表格：单元格值 + 公式 + 结构"""
+    _validate_document(path)
     from openpyxl import load_workbook
-    wb = load_workbook(path, data_only=False)
+    wb = load_workbook(path, data_only=False, read_only=True)
     ws = wb.active
 
     cells, formulas = [], []
@@ -119,6 +145,7 @@ def fp_excel(path):
 
 def fp_ppt(path):
     """WPS演示：文本 + 结构"""
+    _validate_document(path)
     from pptx import Presentation
     prs = Presentation(path)
 
@@ -222,7 +249,10 @@ def collect(dirpath, etype):
 
 
 def run(files, etype, high=HIGH_DEFAULT, warn=WARN_DEFAULT,
-        z_high=2.0, z_warn=1.0, verbose=True):
+        z_high=2.0, z_warn=1.0, verbose=True, *,
+        max_submissions=MAX_SUBMISSIONS, max_pairs=MAX_PAIRS,
+        max_text_chars=MAX_TEXT_CHARS, max_total_text_chars=MAX_TOTAL_TEXT_CHARS,
+        max_pair_text_chars=MAX_PAIR_TEXT_CHARS):
     """
     :param files: [(显示名, 路径)]
     :return: (全部对, 可疑对, 基线信息)
@@ -234,21 +264,61 @@ def run(files, etype, high=HIGH_DEFAULT, warn=WARN_DEFAULT,
     为什么不能只看绝对相似度：同一道操作题，学生的答案天然就有 0.9+ 的相似度，
     用固定阈值会导致「全班都可疑」，等于没有检测。
     """
+    max_submissions = max(0, int(max_submissions))
+    max_pairs = max(0, int(max_pairs))
+    max_text_chars = max(1, int(max_text_chars))
+    max_total_text_chars = max(1, int(max_total_text_chars))
+    max_pair_text_chars = max(1, int(max_pair_text_chars))
+    unique = {}
+    for name, path in sorted(files, key=lambda item: (str(item[0]), str(item[1]))):
+        unique[name] = path
+    selected = sorted(unique.items())[:max_submissions]
+    pair_total = len(selected) * (len(selected) - 1) // 2
+    info = {"mean": 0.0, "std": 0.0, "n": 0, "z_high": z_high,
+            "z_warn": z_warn, "degenerate": True, "status": "complete",
+            "submissions": len(selected), "unique_hosts": len(unique),
+            "duplicates": len(files) - len(unique), "pair_total": pair_total,
+            "compared": 0, "skipped_pairs": 0, "skipped_files": 0,
+            "limits": {"submissions": max_submissions, "pairs": max_pairs,
+                       "text_chars": max_text_chars}}
+    if len(unique) > max_submissions or pair_total > max_pairs:
+        info["status"] = "rejected"
+        info["reason"] = "submission_or_pair_budget_exceeded"
+        return [], [], info
+
     fp_fn = FP[etype]
     fps = {}
-    for name, path in files:
+    total_chars = 0
+    for name, path in selected:
         try:
-            fps[name] = fp_fn(path)
+            fp = fp_fn(path)
+            size = len(fp.get("text") or "") + len(fp.get("core") or "")
+            if size > max_text_chars or total_chars + size > max_total_text_chars:
+                raise ValueError("text_budget_exceeded")
+            fps[name] = fp
+            total_chars += size
         except Exception as e:
+            info["skipped_files"] += 1
             if verbose:
                 print(f"  ⚠️ 跳过 {name}: {e}")
 
-    names = list(fps.keys())
+    names = sorted(fps)
     raw = []
     for a, b in combinations(names, 2):
+        pair_chars = sum(len(fps[n].get(key) or "")
+                         for n in (a, b) for key in ("text", "core"))
+        if pair_chars > max_pair_text_chars:
+            info["skipped_pairs"] += 1
+            continue
         score, parts, identical = compare(fps[a], fps[b])
         raw.append({"a": a, "b": b, "score": score,
                     "相同内容": identical, "parts": parts})
+    info["compared"] = len(raw)
+    info["n"] = len(raw)
+    if len(fps) < 2:
+        info["status"] = "insufficient"
+    elif info["skipped_files"] or info["skipped_pairs"]:
+        info["status"] = "partial"
 
     mean, std = baseline([r["score"] for r in raw])
     # 标准差≈0 时相对基线失效：全班分数几乎一样，z 全趋近 0，会导致除了
@@ -288,9 +358,8 @@ def run(files, etype, high=HIGH_DEFAULT, warn=WARN_DEFAULT,
 
     all_pairs.sort(key=lambda x: -x["score"])
     suspects.sort(key=lambda x: -x["score"])
-    info = {"mean": round(mean, 4), "std": round(std, 4),
-            "n": len(raw), "z_high": z_high, "z_warn": z_warn,
-            "degenerate": degenerate}
+    info.update({"mean": round(mean, 4), "std": round(std, 4),
+                 "degenerate": degenerate})
     return all_pairs, suspects, info
 
 
@@ -336,10 +405,12 @@ def report(all_pairs, suspects, out_csv=None, top=20, info=None):
                                               "公式内容", "内容完全相同", "判定"])
             w.writeheader()
             for r in all_pairs:
-                w.writerow({"学生A": r["a"], "学生B": r["b"],
+                w.writerow({"学生A": csv_safe_value(r["a"]),
+                            "学生B": csv_safe_value(r["b"]),
                             "综合相似度": r["score"], "偏离(σ)": r["z"],
-                            "文本": r["text"], "结构": r["struct"],
-                            "公式内容": r["formula"],
+                            "文本": csv_safe_value(r["text"]),
+                            "结构": csv_safe_value(r["struct"]),
+                            "公式内容": csv_safe_value(r["formula"]),
                             "内容完全相同": "是" if r["identical"] else "",
                             "判定": VERDICT[r["verdict"]]})
         print(f"\n✅ 完整报告: {out_csv}")

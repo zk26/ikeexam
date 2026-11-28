@@ -15,6 +15,7 @@ import re
 import shutil
 import socket
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -26,6 +27,14 @@ PACKAGE_DIR = os.path.dirname(CLIENT_DIR)
 SRC_DIR = os.path.dirname(PACKAGE_DIR)
 sys.path.insert(0, CLIENT_DIR)
 sys.path.insert(0, SRC_DIR)
+
+from ikeexam.shared.security import (MAX_IMAGE_BYTES, MAX_JSON_BYTES,
+                                     MAX_MATERIAL_BYTES, MAX_UPLOAD_BYTES,
+                                     LimitError, atomic_json, atomic_write,
+                                     copy_limited, data_dir, identity_key,
+                                     material_name, normalize_origin, origin_key,
+                                     principal_key, read_limited, safe_replace)
+from ikeexam.shared.outbox import DurableOutbox
 
 
 def _app_dir():
@@ -94,6 +103,10 @@ class Config:
     填了具体地址 = 优先直连，连不上再自动发现
     """
     FILE = os.path.join(_app_dir(), "config.json")
+    DATA_DIR = data_dir("ikeexam-student")
+    CREDENTIAL_FILE = os.path.join(DATA_DIR, "credentials.json")
+    OUTBOX_FILE = os.path.join(DATA_DIR, "outbox.json")
+    on_identity_change = None
 
     def __init__(self):
         self.server = ""          # 空 = 自动寻找
@@ -107,9 +120,10 @@ class Config:
         # 现在换成 MAC（局域网内唯一），生成一次就写进 config.json 固定下来。
         self.client_id = ""
         self.token = ""
+        self.token_origin = ""
         self.name = ""            # 学生姓名（登录时填）
         self.seat = ""            # 座位号/学号（登录时填）
-        self.logged_in = False    # 是否已登录（填过姓名座位号或免密码进入）
+        self.logged_in = False    # 是否已登录（本人填过信息或老师开启免密码考试）
         self.passwordless = False
         self.work_dir = WORK_ROOT
         self.auto_discover = True
@@ -134,6 +148,9 @@ class Config:
                 # 老配置没有 client_id：按当前 MAC 补一个并立刻存盘
                 self.client_id = (d.get("client_id") or "").strip()
                 self.token = (d.get("token") or "").strip()
+                self.token_origin = str(d.get("server") or "")
+                if not self.token:
+                    self._load_credentials()
                 if not self.client_id:
                     self.client_id = self._new_client_id()
                     self._save_quiet()
@@ -163,20 +180,44 @@ class Config:
                 except Exception:
                     pass
 
+    def _load_credentials(self):
+        try:
+            with open(self.CREDENTIAL_FILE, "rb") as stream:
+                payload = json.loads(read_limited(stream, MAX_JSON_BYTES).decode("utf-8"))
+            token = str(payload.get("token") or "").strip()
+            origin = str(payload.get("origin") or "")
+            if origin and origin_key(origin, allow_plain_http=True) == origin_key(
+                    self.server or origin, allow_plain_http=True):
+                self.token = token
+                self.token_origin = origin
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def save_credentials(self):
+        if self.token and self.token_origin:
+            atomic_json(self.CREDENTIAL_FILE,
+                        {"token": self.token, "origin": origin_key(
+                            self.token_origin, allow_plain_http=True)})
+        else:
+            try:
+                os.remove(self.CREDENTIAL_FILE)
+            except OSError:
+                pass
+
     def save(self):
-        with open(self.FILE, "w", encoding="utf-8") as f:
-            json.dump({"server": self.server, "fallback": self.fallback,
+        if self.token and not self.token_origin:
+            self.token_origin = self.server
+        self.save_credentials()
+        atomic_json(self.FILE, {"server": self.server, "fallback": self.fallback,
                        "hostname": self.hostname,
                        "client_id": self.client_id,
-                       "token": self.token,
                        "name": self.name, "seat": self.seat,
                        "logged_in": self.logged_in,
                        "passwordless": self.passwordless,
                        "work_dir": self.work_dir,
                        "auto_discover": self.auto_discover,
                        "auto_next": self.auto_next,
-                       "window_mode": self.window_mode},
-                       f, ensure_ascii=False, indent=2)
+                       "window_mode": self.window_mode})
 
     def _save_quiet(self):
         """配置迁移时用：写失败也不该影响启动"""
@@ -204,9 +245,30 @@ class Config:
 class Api:
     def __init__(self, cfg):
         self.cfg = cfg
+        self.generation = 0
+        self.identity = ""
+        self._request_lock = threading.RLock()
 
     def _url(self, path):
-        return self.cfg.server.rstrip("/") + path
+        return normalize_origin(self.cfg.server, allow_plain_http=True) + path
+
+    def _check_identity(self, generation, identity):
+        if generation != self.generation or identity != self.identity:
+            raise RuntimeError("考生身份已切换，操作已取消")
+
+    def _authorized_headers(self, extra=None):
+        headers = dict(extra or {})
+        token = getattr(self.cfg, "token", "")
+        origin = getattr(self.cfg, "token_origin", "")
+        try:
+            approved = bool(token and origin and origin_key(
+                origin, allow_plain_http=True) == origin_key(
+                    self.cfg.server, allow_plain_http=True))
+        except ValueError:
+            approved = False
+        if approved:
+            headers["X-Exam-Token"] = token
+        return headers
 
     def _post(self, path, data=None, timeout=10):
         return self._request(path, data=data, timeout=timeout)
@@ -215,10 +277,7 @@ class Api:
         return self._request(path, timeout=timeout)
 
     def _headers(self, extra=None):
-        headers = dict(extra or {})
-        if getattr(self.cfg, "token", ""):
-            headers["X-Exam-Token"] = self.cfg.token
-        return headers
+        return self._authorized_headers(extra)
 
     def _request(self, path, data=None, timeout=10):
         """
@@ -227,25 +286,31 @@ class Api:
         这里不能让异常冒出去把学生端搞崩，统一转成 {ok:False, msg:...}
         """
         try:
-            if data is None:
-                req = urllib.request.Request(self._url(path), method="GET",
-                                             headers=self._headers())
-            else:
+            with self._request_lock:
+                generation = self.generation
+                identity = self.identity
+                body = None if data is None else json.dumps(data).encode("utf-8")
+                if body is not None and len(body) > MAX_JSON_BYTES:
+                    raise LimitError("请求内容超过大小限制")
+                self._check_identity(generation, identity)
                 req = urllib.request.Request(
-                    self._url(path),
-                    data=json.dumps(data).encode("utf-8"),
-                    headers=self._headers({"Content-Type": "application/json"}),
-                    method="POST")
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode("utf-8"))
+                    self._url(path), data=body, method="GET" if body is None else "POST",
+                    headers=self._authorized_headers(
+                        {} if body is None else {"Content-Type": "application/json"}))
+                self._check_identity(generation, identity)
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    raw = read_limited(r, MAX_JSON_BYTES)
+                self._check_identity(generation, identity)
+                return json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as e:
-            # 尽量把服务端返回的错误信息读出来
             detail = ""
             try:
-                body = json.loads(e.read().decode("utf-8"))
+                body = json.loads(read_limited(e, MAX_JSON_BYTES).decode("utf-8"))
                 detail = body.get("msg", "")
             except Exception:
                 pass
+            finally:
+                e.close()
             return {"ok": False, "msg": detail or f"服务器拒绝（HTTP {e.code}）"}
         except Exception as e:
             return {"ok": False, "msg": f"{type(e).__name__}: {e}"}
@@ -263,15 +328,24 @@ class Api:
         })
         if r.get("ok"):
             student = r.get("student") or {}
+            new_name = str(student.get("name") or self.cfg.name)
+            new_seat = str(student.get("seat") or self.cfg.seat)
+            callback = getattr(self.cfg, "on_identity_change", None)
+            if callback and (new_name, new_seat) != (self.cfg.name, self.cfg.seat):
+                callback()
             if student.get("name"):
-                self.cfg.name = str(student["name"])
+                self.cfg.name = new_name
             if student.get("seat"):
-                self.cfg.seat = str(student["seat"])
+                self.cfg.seat = new_seat
             if (r.get("exam") or {}).get("passwordless"):
                 self.cfg.logged_in = True
                 self.cfg.passwordless = True
+            elif self.cfg.passwordless:
+                self.cfg.logged_in = False
+                self.cfg.passwordless = False
             if r.get("token"):
-                self.cfg.token = r["token"]
+                self.cfg.token = str(r["token"])
+                self.cfg.token_origin = self.cfg.server
             try:
                 self.cfg.save()
             except Exception:
@@ -326,9 +400,15 @@ class Api:
 
     def get_bytes(self, path, timeout=10):
         """原样下载（选项图片等二进制资源）"""
-        req = urllib.request.Request(self._url(path), headers=self._headers())
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read()
+        with self._request_lock:
+            generation, identity = self.generation, self.identity
+            req = urllib.request.Request(
+                self._url(path), headers=self._authorized_headers())
+            self._check_identity(generation, identity)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = read_limited(r, MAX_IMAGE_BYTES)
+            self._check_identity(generation, identity)
+            return raw
 
     def log(self, level, msg):
         try:
@@ -347,40 +427,29 @@ class Api:
         os.makedirs(dest_dir, exist_ok=True)
         # 素材名来自服务端，净化掉路径分隔符，防止 ../ 目录穿越；
         # 下载链接也统一用净化后的名字，保证两边一致
-        safe = _safe_dir_name(name, "material")
+        safe = material_name(name)
         dest = os.path.join(dest_dir, safe)
-        tmp = dest + ".part"
-        url = self._url(f"/api/material/{urllib.parse.quote(safe)}")
+        fd, tmp = tempfile.mkstemp(prefix=".material-", suffix=".part", dir=dest_dir)
         try:
-            with urllib.request.urlopen(
-                urllib.request.Request(url, headers=self._headers()),
-                timeout=120) as r:
-                try:
-                    total = int(r.headers.get("Content-Length") or 0)
-                except Exception:
-                    total = 0
-                got = 0
-                with open(tmp, "wb") as f:
-                    while True:
-                        chunk = r.read(65536)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        got += len(chunk)
-                        if on_progress:
-                            try:
-                                on_progress(got, total)
-                            except Exception:
-                                pass
-            try:
-                os.replace(tmp, dest)
-            except OSError:
-                # 目标被 WPS 占用等：退回直接写
-                with open(dest, "wb") as f:
-                    with open(tmp, "rb") as g:
-                        f.write(g.read())
+            with self._request_lock:
+                generation, identity = self.generation, self.identity
+                url = self._url(f"/api/material/{urllib.parse.quote(safe)}")
+                req = urllib.request.Request(url, headers=self._authorized_headers())
+                self._check_identity(generation, identity)
+                with os.fdopen(fd, "wb") as f:
+                    with urllib.request.urlopen(req, timeout=120) as r:
+                        try:
+                            total = int(r.headers.get("Content-Length") or 0)
+                        except Exception:
+                            total = 0
+                        if total > MAX_MATERIAL_BYTES:
+                            raise LimitError("素材超过大小限制")
+                        got = copy_limited(r, f, MAX_MATERIAL_BYTES)
+                    f.flush()
+                    os.fsync(f.fileno())
+                self._check_identity(generation, identity)
+            safe_replace(tmp, dest)
         finally:
-            # 不管成功失败，都清掉 .part：中断下载不该留下半个文件
             try:
                 if os.path.isfile(tmp):
                     os.remove(tmp)
@@ -388,34 +457,54 @@ class Api:
                 pass
         return dest
 
+    def _multipart_upload(self, url_builder, fields, filename, source, size=None,
+                          content_type="application/octet-stream"):
+        boundary = uuid.uuid4().hex
+        source.seek(0, os.SEEK_END)
+        actual_size = source.tell()
+        if size is None:
+            size = actual_size
+        if actual_size != size or size > MAX_UPLOAD_BYTES:
+            raise LimitError("上传文件为空、已变化或超过大小限制")
+        source.seek(0)
+        tmp = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
+        try:
+            for key, value in fields:
+                tmp.write(f"--{boundary}\r\nContent-Disposition: form-data; "
+                          f'name="{key}"\r\n\r\n{value}\r\n'.encode("utf-8"))
+            quoted = urllib.parse.quote(filename, safe="")
+            fallback = filename.encode("ascii", "replace").decode("ascii").replace('"', "_")
+            tmp.write((f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+                       f"filename=\"{fallback}\"; filename*=UTF-8''{quoted}\r\n"
+                       f"Content-Type: {content_type}\r\n\r\n").encode("ascii"))
+            copy_limited(source, tmp, MAX_UPLOAD_BYTES)
+            tmp.write(f"\r\n--{boundary}--\r\n".encode("ascii"))
+            length = tmp.tell()
+            tmp.seek(0)
+            with self._request_lock:
+                generation, identity = self.generation, self.identity
+                self._check_identity(generation, identity)
+                req = urllib.request.Request(
+                    url_builder(), data=tmp, method="POST",
+                    headers=self._authorized_headers({
+                        "Content-Type": f"multipart/form-data; boundary={boundary}",
+                        "Content-Length": str(length)}))
+                self._check_identity(generation, identity)
+                with urllib.request.urlopen(req, timeout=120) as response:
+                    raw = read_limited(response, MAX_JSON_BYTES)
+                self._check_identity(generation, identity)
+                return json.loads(raw.decode("utf-8"))
+        finally:
+            tmp.close()
+
     def upload(self, exam_id, path, task_id=0):
         """上传答卷（multipart，手写不依赖 requests）。task_id：哪一道操作题"""
-        boundary = uuid.uuid4().hex
-        fname = os.path.basename(path)
+        fname = material_name(os.path.basename(path))
         with open(path, "rb") as f:
-            content = f.read()
-
-        body = b""
-        body += f"--{boundary}\r\n".encode()
-        body += f'Content-Disposition: form-data; name="host"\r\n\r\n{self.cfg.hostname}\r\n'.encode()
-        body += f"--{boundary}\r\n".encode()
-        body += (f'Content-Disposition: form-data; name="client_id"\r\n\r\n'
-                 f'{self.cfg.client_id}\r\n').encode()
-        body += f"--{boundary}\r\n".encode()
-        body += f'Content-Disposition: form-data; name="exam_id"\r\n\r\n{exam_id}\r\n'.encode()
-        body += f"--{boundary}\r\n".encode()
-        body += f'Content-Disposition: form-data; name="task_id"\r\n\r\n{int(task_id or 0)}\r\n'.encode()
-        body += f"--{boundary}\r\n".encode()
-        body += (f'Content-Disposition: form-data; name="file"; filename="{fname}"\r\n'
-                 f"Content-Type: application/octet-stream\r\n\r\n").encode()
-        body += content + b"\r\n"
-        body += f"--{boundary}--\r\n".encode()
-
-        req = urllib.request.Request(
-            self._url("/api/upload"), data=body, method="POST",
-            headers=self._headers({"Content-Type": f"multipart/form-data; boundary={boundary}"}))
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.loads(r.read().decode("utf-8"))
+            return self._multipart_upload(
+                lambda: self._url("/api/upload"),
+                [("host", self.cfg.hostname), ("client_id", self.cfg.client_id),
+                 ("exam_id", exam_id), ("task_id", int(task_id or 0))], fname, f)
 
     def upload_drawing(self, exam_id, data, ext=".png", kind="draw"):
         """
@@ -423,29 +512,16 @@ class Api:
         kind: draw=画板创作（自由画）, beads=拼豆题 —— 两道小题各传各的。
         """
         kind = "beads" if kind == "beads" else "draw"
-        boundary = uuid.uuid4().hex
+        if not isinstance(data, (bytes, bytearray)) or len(data) > MAX_IMAGE_BYTES:
+            raise LimitError("图片超过大小限制")
+        import io
         tag = "拼豆" if kind == "beads" else "画板"
         fname = tag + (ext if ext.startswith(".") else "." + ext)
-        body = b""
-        body += f"--{boundary}\r\n".encode()
-        body += f'Content-Disposition: form-data; name="host"\r\n\r\n{self.cfg.hostname}\r\n'.encode()
-        body += f"--{boundary}\r\n".encode()
-        body += (f'Content-Disposition: form-data; name="client_id"\r\n\r\n'
-                 f'{self.cfg.client_id}\r\n').encode()
-        body += f"--{boundary}\r\n".encode()
-        body += f'Content-Disposition: form-data; name="exam_id"\r\n\r\n{int(exam_id)}\r\n'.encode()
-        body += f"--{boundary}\r\n".encode()
-        body += f'Content-Disposition: form-data; name="kind"\r\n\r\n{kind}\r\n'.encode()
-        body += f"--{boundary}\r\n".encode()
-        body += (f'Content-Disposition: form-data; name="file"; filename="{fname}"\r\n'
-                 f"Content-Type: application/octet-stream\r\n\r\n").encode()
-        body += data + b"\r\n"
-        body += f"--{boundary}--\r\n".encode()
-        req = urllib.request.Request(
-            self._url("/api/drawing/upload"), data=body, method="POST",
-            headers=self._headers({"Content-Type": f"multipart/form-data; boundary={boundary}"}))
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.loads(r.read().decode("utf-8"))
+        return self._multipart_upload(
+            lambda: self._url("/api/drawing/upload"),
+            [("host", self.cfg.hostname), ("client_id", self.cfg.client_id),
+             ("exam_id", int(exam_id)), ("kind", kind)], fname,
+            io.BytesIO(data), len(data))
 
     def submit_empty(self, exam_id, task_id=0):
         """
@@ -456,11 +532,19 @@ class Api:
                            "client_id": self.cfg.client_id,
                            "exam_id": int(exam_id),
                            "task_id": int(task_id or 0)}).encode("utf-8")
-        req = urllib.request.Request(
-            self._url("/api/upload_empty"), data=body, method="POST",
-            headers=self._headers({"Content-Type": "application/json"}))
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read().decode("utf-8"))
+        if len(body) > MAX_JSON_BYTES:
+            raise LimitError("请求内容超过大小限制")
+        with self._request_lock:
+            generation, identity = self.generation, self.identity
+            req = urllib.request.Request(
+                self._url("/api/upload_empty"), data=body, method="POST",
+                headers=self._authorized_headers({
+                    "Content-Type": "application/json"}))
+            self._check_identity(generation, identity)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                raw = read_limited(r, MAX_JSON_BYTES)
+            self._check_identity(generation, identity)
+            return json.loads(raw.decode("utf-8"))
 
     @staticmethod
     def local_ip():
@@ -570,8 +654,16 @@ class AnswerSync:
         self.client = client
         self.exam_id = exam_id
         self.interval = interval or self.INTERVAL
-        self.dirty = {}                  # 待提交的答案 {qid: value}
-        self._lock = threading.Lock()
+        self.identity = client.identity
+        self.generation = client.generation
+        self.outbox_key = f"answers:{self.identity}:{self.exam_id}"
+        self.dirty = {}
+        for key, record in client.outbox.records(
+                client.identity, "answers", principal=client.principal):
+            if str(record.get("data", {}).get("exam_id")) == str(exam_id):
+                self.dirty.update({str(k): v for k, v in
+                                   (record.get("data", {}).get("answers") or {}).items()})
+        self._lock = threading.RLock()
         self._stop = threading.Event()
         self.on_saved = None             # 提交成功回调（界面显示"已保存 xx:xx"）
         self.last_saved = 0
@@ -581,16 +673,28 @@ class AnswerSync:
     def update(self, answers):
         """学生改了答案：只记下来，不联网"""
         with self._lock:
-            self.dirty.update(answers)
+            if self.generation != self.client.generation:
+                raise RuntimeError("考生身份已切换，答案未同步")
+            previous = dict(self.dirty)
+            updated = dict(previous)
+            updated.update(answers)
+            try:
+                self.client.outbox.put(
+                    self.outbox_key, self.identity, "answers",
+                    {"exam_id": self.exam_id, "answers": updated},
+                    principal=self.client.principal)
+            except Exception:
+                raise
+            self.dirty = updated
 
     def flush(self):
         """立刻提交攒下的答案（交卷 / 切页 / 退出前必调）"""
         with self._lock:
+            if self.generation != self.client.generation:
+                return False
             if not self.dirty:
                 return True
-            payload = dict(self.dirty)
-            self.dirty.clear()
-        return self._send(payload)
+            return self._send(dict(self.dirty))
 
     def start(self):
         threading.Thread(target=self._loop, daemon=True).start()
@@ -610,6 +714,19 @@ class AnswerSync:
         try:
             r = self.client.api.submit_theory(self.exam_id, payload)
             if r.get("ok"):
+                with self._lock:
+                    if self.generation != self.client.generation:
+                        return False
+                    remaining = {qid: value for qid, value in self.dirty.items()
+                                 if qid not in payload or payload[qid] != value}
+                    if remaining:
+                        self.client.outbox.put(
+                            self.outbox_key, self.identity, "answers",
+                            {"exam_id": self.exam_id, "answers": remaining},
+                            principal=self.client.principal)
+                    else:
+                        self.client.outbox.remove(self.outbox_key)
+                    self.dirty = remaining
                 self.last_saved = time.time()
                 self.failed = 0
                 if self.on_saved:
@@ -621,9 +738,6 @@ class AnswerSync:
             msg = r.get("msg", "")
         except Exception as e:
             msg = str(e)
-        # 失败：还回队列，下轮重试（答案宁可晚到，不能丢）
-        with self._lock:
-            self.dirty.update(payload)
         self.failed += 1
         if self.failed <= 3:
             self.client._log("warn", f"答案同步失败（稍后重试）: {msg}")
@@ -891,6 +1005,19 @@ class ExamClient:
     def __init__(self, cfg=None, headless=False):
         self.cfg = cfg or Config()
         self.api = Api(self.cfg)
+        self.outbox = DurableOutbox(Config.OUTBOX_FILE)
+        self.identity = identity_key(self.cfg)
+        self.principal = principal_key(self.cfg)
+        self.origin = origin_key(self.cfg.server or "localhost:9000",
+                                 allow_plain_http=True)
+        meta = self.outbox.meta()
+        try:
+            self.generation = int(meta.get("generation", 0)) + 1
+        except (TypeError, ValueError):
+            self.generation = 1
+        self._identity_pending = False
+        self._bind_api()
+        self.cfg.on_identity_change = self._prepare_identity_change
         self.headless = headless        # True 时不启动 GUI，只跑逻辑（测试用）
         self.root = None                # LockedRoot 实例，GUI 启动后填充
         self.guard = guard.Guardian(interval=5, logger=self._log)
@@ -937,6 +1064,83 @@ class ExamClient:
         self._force_submit_ok = True
         self._seen_commands = set()
 
+    def _bind_api(self):
+        self.api.generation = self.generation
+        self.api.identity = self.identity
+        self.api.principal = self.principal
+
+    def _accept_hello(self, hello):
+        if not isinstance(hello, dict) or not hello.get("ok", True):
+            message = hello.get("msg") if isinstance(hello, dict) else None
+            self.state["hello_error"] = message or "服务器拒绝了登录"
+            return False
+        self._refresh_identity()
+        self._bind_api()
+        self.state.pop("hello_error", None)
+        self.state["server_name"] = hello.get("server_name", "")
+        self.state["exam"] = hello.get("exam")
+        self.state["materials"] = (hello.get("exam") or {}).get("materials") or []
+        self.state["phase"] = hello.get("phase")
+        if (hello.get("exam") or {}).get("passwordless"):
+            self.state["confirmed"] = True
+        return True
+
+    def _prepare_identity_change(self):
+        if self._identity_pending:
+            return
+        self._identity_pending = True
+        try:
+            if self.answer_sync and self.answer_sync.generation == self.generation:
+                self.answer_sync.flush()
+        finally:
+            if self.answer_sync:
+                self.answer_sync.stop()
+                self.answer_sync = None
+            self.state["submitted"] = False
+            self.state["submitted_key"] = None
+            self.state["submitting"] = False
+
+    def _refresh_identity(self, rebind=True):
+        previous = self.identity
+        key = identity_key(self.cfg, (self.state.get("exam") or {}).get("id"))
+        principal = principal_key(self.cfg)
+        if key == self.identity and principal == self.principal and not self._identity_pending:
+            return False
+        self.generation += 1
+        origin = origin_key(self.cfg.server or "localhost:9000",
+                            allow_plain_http=True)
+        if origin == self.origin and rebind:
+            self.outbox.rebind_identity(previous, key, principal)
+        self.identity = key
+        self.principal = principal
+        self.origin = origin
+        self._identity_pending = False
+        self._bind_api()
+        self.state["submitted"] = False
+        self.state["submitted_key"] = None
+        self.state["submitting"] = False
+        self.outbox.set_meta(generation=self.generation, identity=key)
+        return True
+
+    def is_submitted(self, exam_id=None):
+        key = identity_key(self.cfg, exam_id)
+        return bool(self.state.get("submitted") and
+                    self.state.get("submitted_key") == key)
+
+    def submission_key(self, kind, exam_id):
+        return f"{kind}:{self.identity}:{exam_id}"
+
+    def pending_submission_records(self, exam_id):
+        records = self.outbox.records(self.identity, principal=self.principal)
+        return [(key, record) for key, record in records
+                if record.get("kind") != "final"
+                and str((record.get("data") or {}).get("exam_id")) == str(exam_id)]
+
+    def mark_submitted(self, exam_id=None):
+        key = identity_key(self.cfg, exam_id)
+        self.state["submitted"] = True
+        self.state["submitted_key"] = key
+
     # ---------- 答案同步（理论题）----------
     def begin_answer_sync(self, exam_id):
         """进入理论题时启动：答案先落本地，定时批量上传"""
@@ -944,6 +1148,8 @@ class ExamClient:
                 and not self.answer_sync._stop.is_set()):
             return self.answer_sync
         if self.answer_sync:
+            if self.answer_sync.generation == self.generation:
+                self.answer_sync.flush()
             self.answer_sync.stop()
         self.answer_sync = AnswerSync(self, exam_id).start()
         return self.answer_sync
@@ -979,6 +1185,16 @@ class ExamClient:
 
         # 明确写了地址 → 先直连（force 时跳过）
         if self.cfg.server and not force:
+            try:
+                configured = normalize_origin(self.cfg.server, allow_plain_http=True)
+            except ValueError as exc:
+                self._log("error", str(exc))
+                return None
+            if origin_key(configured, allow_plain_http=True) != self.origin:
+                self._prepare_identity_change()
+            self.cfg.server = configured
+            self._refresh_identity()
+            self._bind_api()
             if on_status:
                 on_status(f"连接 {self.cfg.server} …")
             if discover.try_url(self.cfg.server, timeout=2):
@@ -989,9 +1205,17 @@ class ExamClient:
                 on_status("配置的地址不通，改为自动寻找…")
 
         url = discover.find_server(timeout=timeout, on_status=on_status,
-                                   fallback=self.cfg.fallback)
+                                   fallback=self.cfg.fallback,
+                                   allowed_origins=(self.cfg.server, self.cfg.fallback),
+                                   allow_discovered=self.cfg.auto_discover)
         if url:
-            # 记住这次的地址，但不写进 config（下次仍优先自动发现）
+            normalized = normalize_origin(url, allow_plain_http=True)
+            if origin_key(normalized, allow_plain_http=True) != origin_key(
+                    self.cfg.server or normalized, allow_plain_http=True):
+                self._prepare_identity_change()
+            self.cfg.server = normalized
+            self._refresh_identity()
+            self._bind_api()
             discover.save_cache(url)
         return url
 
@@ -1013,7 +1237,14 @@ class ExamClient:
         """
         name = (_safe_dir_name(self.cfg.name) or _safe_dir_name(self.cfg.seat)
                 or _safe_dir_name(self.cfg.hostname, "unknown"))
-        d = os.path.join(self.cfg.work_dir, name)
+        suffix = identity_key(self.cfg)[:12]
+        legacy = os.path.join(self.cfg.work_dir, name)
+        d = os.path.join(self.cfg.work_dir, f"{name}_{suffix}")
+        if os.path.isdir(legacy) and not os.path.exists(d):
+            try:
+                os.replace(legacy, d)
+            except OSError:
+                d = legacy
         os.makedirs(d, exist_ok=True)
         return d
 
@@ -1066,6 +1297,40 @@ class ExamClient:
                                   ("theory", "practice", "paused") else "idle")
         return progress
 
+    def _sync_passwordless_state(self, payload):
+        if "passwordless" not in payload:
+            return
+        if not payload.get("passwordless"):
+            if self.state.get("exam"):
+                self.state["exam"]["passwordless"] = False
+            self.cfg.passwordless = False
+            try:
+                self.cfg.save()
+            except Exception:
+                pass
+            return
+        exam = self.state.get("exam") or {}
+        allowed = bool(self.state.get("confirmed")
+                       and exam.get("id") == payload.get("exam_id"))
+        if not allowed:
+            h = self.api.hello()
+            if self._accept_hello(h) and (h.get("exam") or {}).get("passwordless"):
+                self.state["tasks"] = h.get("tasks") or []
+                self.state["typing"] = h.get("typing")
+                self.state["drawing"] = h.get("drawing")
+                self._handle_commands(h.get("commands") or [])
+                allowed = True
+            else:
+                self.state["hello_error"] = h.get("msg") or "本机 IP 未通过本场考试名单"
+        if allowed:
+            self.state["confirmed"] = True
+            self.cfg.logged_in = True
+            self.cfg.passwordless = True
+            try:
+                self.cfg.save()
+            except Exception:
+                pass
+
     def heartbeat_loop(self, interval=2):
         """
         心跳循环。断线后自动重连，用指数退避：
@@ -1093,9 +1358,12 @@ class ExamClient:
                 self.conn["last_ok"] = time.time()
 
                 self._handle_commands(r.get("commands") or [])
+                self._refresh_identity()
+                self._bind_api()
                 new_phase = r.get("phase")
                 if new_phase and new_phase != self.state["phase"]:
                     self._on_phase_change(new_phase)
+                self._sync_passwordless_state(r)
                 self.state["remaining"] = r.get("remaining")
                 self.state["theory_answered"] = r.get("theory_answered", 0)
                 self.state["theory_total"] = r.get("theory_total", 0)
@@ -1185,8 +1453,12 @@ class ExamClient:
             url = self.discover(timeout=6, force=True)
             if url:
                 self.cfg.server = url
+                self._refresh_identity()
                 self.api = Api(self.cfg)
+                self._bind_api()
                 h = self.api.hello()
+                if not h.get("ok"):
+                    return False
                 self.state["server_name"] = h.get("server_name", "")
                 self.state["exam"] = h.get("exam")
                 self.state["materials"] = (h.get("exam") or {}).get("materials") or []
@@ -1268,7 +1540,7 @@ class ExamClient:
     def has_typing(self):
         return self.typing_config() is not None
 
-    def typing_state(self):
+    def typing_state(self, restore=False):
         """
         打字统计容器：**跨顶部标签页共享**。
         子任务提到顶部导航后，学生切标签会重建面板 —— 统计放在这里，
@@ -1277,8 +1549,17 @@ class ExamClient:
         ex = self.state.get("exam") or {}
         eid = ex.get("id")
         st = getattr(self, "_typing_state", None)
-        if not st or st.get("exam_id") != eid:
-            st = {"exam_id": eid, "stats": {}}
+        if (not st or st.get("exam_id") != eid
+                or st.get("identity") != self.identity):
+            st = {"exam_id": eid, "identity": self.identity, "stats": {}}
+            if restore:
+                record = self.outbox.record(self.submission_key("final-typing", eid))
+                if (record and record.get("identity") == self.identity
+                        and record.get("kind") == "typing"):
+                    reports = (record.get("data") or {}).get("reports") or []
+                    st["stats"] = {str(item.get("task")): dict(item)
+                                   for item in reports if isinstance(item, dict)
+                                   and item.get("task") is not None}
             self._typing_state = st
         return st
 
@@ -1301,22 +1582,41 @@ class ExamClient:
         t.start()
         self._typing_rep = t
 
-    def flush_typing(self):
-        """把打字统计里已经有进度的任务报给服务端，返回是否成功。"""
+    def typing_reports(self):
         keys = ("task", "progress", "total", "hits", "typed", "correct_chars",
-                "elapsed_ms", "wpm", "accuracy", "reaction_ms", "finished")
+                "elapsed_ms", "wpm", "accuracy", "reaction_ms", "finished", "attempt")
+        st = self.typing_state()
+        if not st.get("exam_id"):
+            return []
+        return [{k: v.get(k) for k in keys}
+                for v in (st.get("stats") or {}).values()
+                if v.get("finished") or v.get("progress") or v.get("typed")]
+
+    def save_typing_reports(self, final=False):
+        st = self.typing_state()
+        if not st.get("exam_id"):
+            return
+        reports = self.typing_reports()
+        if not reports and not final:
+            return
+        final_key = self.submission_key("final-typing", st["exam_id"])
+        self.outbox.put(final_key, self.identity, "typing",
+                        {"exam_id": st["exam_id"], "reports": reports},
+                        principal=self.principal)
+
+    def flush_typing(self, final=False):
+        """把打字统计里已经有进度的任务报给服务端，返回是否成功。"""
         try:
             st = self.typing_state()
-            if not st.get("exam_id"):
+            reports = self.typing_reports()
+            if not reports and not final:
                 return True
-            reports = []
-            for v in (st.get("stats") or {}).values():
-                if not (v.get("finished") or v.get("progress") or v.get("typed")):
-                    continue
-                reports.append({k: v.get(k) for k in keys})
-            if not reports:
-                return True
-            return bool(self.api.typing_report(st["exam_id"], reports).get("ok"))
+            self.save_typing_reports(final=final)
+            ok = bool(self.api.typing_report(st["exam_id"], reports).get("ok"))
+            if ok:
+                final_key = self.submission_key("final-typing", st["exam_id"])
+                self.outbox.remove(final_key)
+            return ok
         except Exception:
             return False
 
@@ -1348,12 +1648,12 @@ class ExamClient:
             "requirement": ex.get("requirement", ""),
             "materials": ex.get("materials") or [],
             "save_as": ex.get("save_as") or f"座位号_姓名{ext}",
-            "submitted": bool(self.state.get("submitted")),
+            "submitted": self.is_submitted(ex.get("id")),
         }]
 
     def _resubmit_if_needed(self):
         """断线期间可能错过了收卷命令，重连后补交一次"""
-        if self.state.get("submitted"):
+        if self.is_submitted((self.state.get("exam") or {}).get("id")):
             return
         if self.state.get("phase") not in ("practice", "ended"):
             return
@@ -1417,11 +1717,13 @@ class ExamClient:
         # 2) 清登录信息（按老师的选择）
         if clear_login:
             try:
+                self._prepare_identity_change()
                 self.cfg.name = ""
                 self.cfg.seat = ""
                 self.cfg.logged_in = False
                 self.cfg.passwordless = False
                 self.cfg.save()
+                self._refresh_identity()
             except Exception:
                 pass
 
@@ -1462,10 +1764,10 @@ class ExamClient:
         acked = []
         for c in cmds:
             cid = c.get("id")
-            if cid is not None and str(cid) in self._seen_commands:
+            t = c.get("type")
+            if cid is not None and str(cid) in self._seen_commands and t != "update_profile":
                 self.api.ack_commands([cid])
                 continue
-            t = c.get("type")
             p = c.get("payload") or {}
             self._log("info", f"收到命令 {t}")
             if t == "force_exit":
@@ -1489,6 +1791,19 @@ class ExamClient:
                 self._on_phase_change("paused")
             elif t == "resume":
                 self.state["section"] = self.state.get("_prev_section")
+                self._notify_ui()
+            elif t == "update_profile":
+                self._prepare_identity_change()
+                self.cfg.name = str(p.get("name") or "").strip()
+                self.cfg.seat = str(p.get("seat") or "").strip()
+                self.cfg.logged_in = True
+                try:
+                    self.cfg.save()
+                except Exception as exc:
+                    self._log("error", f"考生资料保存失败，未确认命令：{exc}")
+                    continue
+                self._refresh_identity()
+                self.state["confirmed"] = True
                 self._notify_ui()
             elif t == "open_app":
                 self.open_wps(p.get("app", "word"))
@@ -1646,6 +1961,9 @@ class ExamClient:
         """
         task_id = int((task or {}).get("task_id") or 0)
         names = (task or {}).get("materials") or self.state["materials"]
+        for name in names:
+            material_name(name)
+        generation, identity = self.generation, self.identity
         d = self.ensure_work_dir(exam_id, task_id)
         got = []
         total_n = len(names)
@@ -1670,6 +1988,8 @@ class ExamClient:
 
             try:
                 p = self.api.download_material(name, d, on_progress=_cb)
+                if generation != self.generation or identity != self.identity:
+                    raise RuntimeError("考生身份已切换，素材下载已取消")
                 got.append(p)
                 self._log("info", f"素材已下载: {name}")
             except Exception as e:
@@ -1679,7 +1999,7 @@ class ExamClient:
 
     def material_path(self, exam_id, task, name):
         """素材在本机的完整路径（下载后要用 WPS 打开它）"""
-        return os.path.join(self.exam_dir(exam_id), name)
+        return os.path.join(self.exam_dir(exam_id), material_name(name))
 
     def answer_tag(self, task_id, task=None):
         """
@@ -1933,10 +2253,14 @@ class ExamClient:
     def submit_file(self, exam_id, path, task_id=0):
         if not os.path.isfile(path):
             return False, "文件不存在"
+        identity = self.identity
+        generation = self.generation
         try:
             r = self.api.upload(exam_id, path, task_id=task_id)
+            if generation != self.generation or identity != self.identity:
+                return False, "考生身份已切换，提交结果已忽略"
             if r.get("ok"):
-                self.state["submitted"] = True
+                self.mark_submitted(exam_id)
                 self._log("info", f"答卷已提交: {os.path.basename(path)}")
                 return True, r.get("auto", {})
             return False, r.get("msg", "提交失败")
@@ -1958,16 +2282,12 @@ class ExamClient:
         # 2. 握手
         try:
             h = self.api.hello()
-            if not h.get("ok", True):
-                # 服务端拒了（比如姓名不在本场名单里）—— 把原因带回界面显示
-                self.state["hello_error"] = h.get("msg") or "服务器拒绝了登录"
+            if not self._accept_hello(h):
                 self._log("error", self.state["hello_error"])
                 return False
-            self.state.pop("hello_error", None)
-            self.state["server_name"] = h.get("server_name", "")
             self._log("info", f"已连接服务器 {self.cfg.server}，阶段={h.get('phase')}")
-            self.state["exam"] = h.get("exam")
-            self.state["phase"] = h.get("phase")
+            if not getattr(self.cfg, "logged_in", False):
+                self.state["confirmed"] = False
             self.state["tasks"] = h.get("tasks") or []
             self.state["typing"] = h.get("typing")
             self.state["drawing"] = h.get("drawing")
@@ -2079,7 +2399,7 @@ def selftest(server=None):
     print("\n--- 5. 自动发现服务器 ---")
     import discover as D
     url = D.find_server(timeout=8, on_status=lambda m: print("   " + m),
-                        fallback=cfg.fallback)
+                        fallback=cfg.fallback, allow_discovered=cfg.auto_discover)
     if not url:
         print("   ❌ 没能确定服务器地址")
         print("   排查：")

@@ -171,6 +171,18 @@ def export_csv(exam_id, out_path):
     return out_path
 
 
+def _archive_component(value, fallback):
+    name = str(value or "").strip()
+    if (not name or name in (".", "..") or name.startswith(".")
+            or any(ch in name for ch in '\\/:*?"<>|')
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)
+            or name.split(".")[0].rstrip().upper() in {
+                "CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                *(f"LPT{i}" for i in range(1, 10))}):
+        return fallback
+    return name
+
+
 def collect_zip(exam_id, out_path, from_dir=None, exam_code="", klass=""):
     """
     打包学生答卷。
@@ -187,21 +199,24 @@ def collect_zip(exam_id, out_path, from_dir=None, exam_code="", klass=""):
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
         if from_dir and os.path.isdir(from_dir) and exam_code:
             prefix = f"{exam_code}_"
-            sub = os.path.basename(from_dir) if not klass else klass
+            sub = _archive_component(klass, _archive_component(
+                os.path.basename(from_dir), "未分班"))
             for name in sorted(os.listdir(from_dir)):
                 p = os.path.join(from_dir, name)
+                member = _archive_component(name, "答卷")
                 if os.path.isfile(p) and name.startswith(prefix):
-                    z.write(p, f"{sub}/{name}")
+                    z.write(p, f"{sub}/{member}")
             return out_path
         subs = db.list_submissions(exam_id)
         for s in subs:
             if s["saved_path"] and os.path.isfile(s["saved_path"]):
-                z.write(s["saved_path"],
-                        f"{s['hostname']}_p{s.get('participant_id') or 0}_{s['filename']}")
+                host = _archive_component(s.get("hostname"), "unknown")
+                filename = _archive_component(s.get("filename"), "答卷")
+                z.write(s["saved_path"], f"{host}_p{s.get('participant_id') or 0}_{filename}")
         # 画板作品（一张压缩图）一并打包：画板/{机器名}_画板.png
         for d in db.drawings_for(exam_id):
             if d.get("saved_path") and os.path.isfile(d["saved_path"]):
-                name = d.get("filename") or "画板.png"
-                z.write(d["saved_path"],
-                        f"画板/{d['hostname']}_p{d.get('participant_id') or 0}_{name}")
+                host = _archive_component(d.get("hostname"), "unknown")
+                name = _archive_component(d.get("filename"), "画板.png")
+                z.write(d["saved_path"], f"画板/{host}_p{d.get('participant_id') or 0}_{name}")
     return out_path

@@ -24,6 +24,7 @@ import os
 import socket
 import threading
 import time
+from collections import OrderedDict
 
 # 广播端口（与 HTTP 服务端口分开，避免冲突）
 BEACON_PORT = 39100
@@ -33,9 +34,46 @@ MULTICAST_TTL = 2
 # 握手暗号：防止收到别的服务乱发的包
 MAGIC = "EXAM-SERVER-V1"
 INTERVAL = 3          # 每 3 秒广播一次
+NIC_CACHE_TTL = 30
+QUERY_RATE = 2.0
+QUERY_BURST = 10
+GLOBAL_QUERY_RATE = 100.0
+GLOBAL_QUERY_BURST = 200
+MAX_QUERY_SOURCES = 1024
+MAX_RESPONSE_BYTES = 512
+_nic_cache = (0.0, [])
+_nic_lock = threading.Lock()
+
+
+def _rate_allowed(key, now, rate, burst, buckets, limit):
+    state = buckets.get(key)
+    if state is None:
+        if len(buckets) >= limit:
+            buckets.popitem(last=False)
+        state = [burst, now]
+        buckets[key] = state
+    tokens, updated = state
+    tokens = min(burst, tokens + (now - updated) * rate)
+    if tokens < 1:
+        buckets[key] = (tokens, now)
+        return False
+    buckets[key] = (tokens - 1, now)
+    return True
 
 
 def local_broadcast_addrs():
+    global _nic_cache
+    now = time.monotonic()
+    with _nic_lock:
+        if now - _nic_cache[0] < NIC_CACHE_TTL:
+            return list(_nic_cache[1])
+    addrs = _enumerate_broadcast_addrs()
+    with _nic_lock:
+        _nic_cache = (now, tuple(addrs))
+    return list(addrs)
+
+
+def _enumerate_broadcast_addrs():
     """
     算出本机所有网卡的广播地址
     返回 [(广播地址, 本机该网卡IP)]
@@ -56,16 +94,7 @@ def local_broadcast_addrs():
             if bcast:
                 out.append((bcast, ipv4))
     except ImportError:
-        # 没装 psutil 就退回最朴素的方式
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            if ip and not ip.startswith("127."):
-                out.append(("255.255.255.255", ip))
-        except Exception:
-            pass
+        pass
     if not out:
         out.append(("255.255.255.255", "0.0.0.0"))
     return out
@@ -129,6 +158,9 @@ class Beacon:
         self._responder = None
         self._sent = 0
         self._answered = 0
+        self._query_buckets = OrderedDict()
+        self._query_lock = threading.Lock()
+        self._global_bucket = [GLOBAL_QUERY_BURST, time.monotonic()]
 
     # ---- 广播内容 ----
     def payload(self, ip=None):
@@ -136,15 +168,21 @@ class Beacon:
         :param ip: 这张网卡的 IP。不填就用 preferred_ip()
         字段里带完整 http 地址，学生端就不用自己拼了
         """
-        ip = ip or preferred_ip()
-        return json.dumps({
+        ip = str(ip or preferred_ip())[:45]
+        port = int(self.http_port)
+        if not 1 <= port <= 65535:
+            raise ValueError("invalid_http_port")
+        payload = json.dumps({
             "magic": MAGIC,
-            "name": self.name,
-            "http": f"http://{ip}:{self.http_port}",
+            "name": str(self.name)[:200],
+            "http": f"http://{ip}:{port}",
             "ip": ip,
-            "port": self.http_port,
+            "port": port,
             "ts": int(time.time()),
         }, ensure_ascii=False).encode("utf-8")
+        if len(payload) > MAX_RESPONSE_BYTES:
+            raise ValueError("response_too_large")
+        return payload
 
     # ---- socket ----
     def _sock_broadcast(self):
@@ -224,10 +262,6 @@ class Beacon:
         """
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            try:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            except Exception:
-                pass
             s.bind(("", BEACON_PORT))
             s.settimeout(0.5)
         except Exception as e:
@@ -242,14 +276,25 @@ class Beacon:
                 continue
             except Exception:
                 break
-            # 只回应询问包，忽略自己发出去的广播
             try:
                 msg = json.loads(data.decode("utf-8"))
-                is_query = msg.get("cmd") == "discover"
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("cmd") != "discover" or msg.get("magic") != MAGIC:
+                    continue
             except Exception:
-                is_query = b"discover" in data
-            if not is_query:
                 continue
+            now = time.monotonic()
+            with self._query_lock:
+                tokens, updated = self._global_bucket
+                tokens = min(GLOBAL_QUERY_BURST,
+                             tokens + (now - updated) * GLOBAL_QUERY_RATE)
+                allowed = tokens >= 1
+                self._global_bucket = (tokens - 1 if allowed else tokens, now)
+                if not allowed or not _rate_allowed(
+                        addr[0], now, QUERY_RATE, QUERY_BURST,
+                        self._query_buckets, MAX_QUERY_SOURCES):
+                    continue
             try:
                 s.sendto(self.payload(), addr)
                 self._answered += 1

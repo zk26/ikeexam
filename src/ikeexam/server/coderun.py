@@ -21,12 +21,16 @@ server/coderun.py —— 程序填空判题（OJ 判题主体）
     这类写法绕过，真正防线是 sandbox 的资源限制 + 降权（见 README「OJ 安全」）
   · 排队限流：全局信号量，超配额就等，不拒绝（等太久才报 error）
 """
+import hashlib
+import json
 import logging
 import os
 import re
 import shutil
 import sys
 import threading
+import time
+from collections import OrderedDict
 
 try:
     from .sandbox import run as sandbox_run
@@ -59,6 +63,13 @@ _gate = threading.Semaphore(int(os.environ.get("SANDBOX_MAX_CONCURRENCY", "4")))
 # 排队最久等 30 秒；超了返回 "error" 让 db 标记待重判，而不是无限阻塞请求线程。
 QUEUE_TIMEOUT = 30.0
 
+RESULT_CACHE_TTL = float(os.environ.get("OJ_RESULT_CACHE_TTL", "300"))
+RESULT_CACHE_MAX = int(os.environ.get("OJ_RESULT_CACHE_MAX", "1024"))
+_result_lock = threading.Lock()
+_result_cache = OrderedDict()
+_inflight = {}
+_cache_generation = 0
+
 # 危险写法词表（只告警，不拦截）
 DANGER = (
     "os.system", "subprocess", "popen", "shutil.", "rmtree",
@@ -70,10 +81,53 @@ DANGER = (
 _cpp_cache = {"cc": None, "done": False}
 
 
+def _is_within(path, parent):
+    path = os.path.normcase(os.path.realpath(path))
+    parent = os.path.normcase(os.path.realpath(parent))
+    try:
+        return os.path.commonpath([path, parent]) == parent
+    except ValueError:
+        return False
+
+
+def _safe_path_dirs():
+    cwd = os.path.realpath(os.getcwd())
+    dirs = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if not entry or not os.path.isabs(entry):
+            continue
+        entry = os.path.realpath(entry)
+        if _is_within(entry, cwd):
+            continue
+        if entry not in dirs:
+            dirs.append(entry)
+    return dirs
+
+
+def _trusted_which(name):
+    """Resolve only absolute PATH candidates outside the server working directory."""
+    names = [name]
+    if os.name == "nt":
+        extensions = [ext for ext in os.environ.get(
+            "PATHEXT", ".COM;.EXE;.BAT;.CMD").split(os.pathsep) if ext]
+        if extensions and not name.lower().endswith(
+                tuple(ext.lower() for ext in extensions)):
+            names = [name + ext for ext in extensions]
+    for directory in _safe_path_dirs():
+        for filename in names:
+            found = shutil.which(os.path.join(directory, filename))
+            if found:
+                found = os.path.realpath(found)
+                if os.path.isfile(found) and not _is_within(found, os.getcwd()):
+                    return found
+    return None
+
+
 def _find_cpp():
     """找 C++ 编译器，结果缓存。找不到返回 None。"""
     if not _cpp_cache["done"]:
-        _cpp_cache["cc"] = shutil.which("g++") or shutil.which("clang++")
+        _cpp_cache["cc"] = _trusted_which("g++") or _trusted_which("clang++")
         _cpp_cache["done"] = True
     return _cpp_cache["cc"]
 
@@ -85,8 +139,13 @@ def clear_cache():
     db.rejudge_code_answers 重判前会调它：老师补装了 g++ 后，这里若不重置，
     _cpp_cache 里还是旧的「没找到」，重判时 C++ 题仍会判成「按空给分」。
     """
+    global _cache_generation
     _cpp_cache["cc"] = None
     _cpp_cache["done"] = False
+    with _result_lock:
+        _result_cache.clear()
+        # A flight started before this invalidation must not repopulate stale results.
+        _cache_generation += 1
 
 
 def guard(code, question_id=None, user_id=None):
@@ -166,11 +225,11 @@ def _python_exe():
         exe = sys.executable          # 源码运行：就是当前解释器
     else:
         env = os.environ.get("EXAM_PYTHON", "").strip()
-        if env and os.path.isfile(env):
-            exe = env
+        if env and os.path.isabs(env) and os.path.isfile(env):
+            exe = os.path.realpath(env)
         if not exe:
             for name in ("python.exe", "python3.exe", "python"):
-                exe = shutil.which(name)
+                exe = _trusted_which(name)
                 if exe:
                     break
         if not exe:
@@ -197,12 +256,12 @@ def _python_exe():
     return exe
 
 
-def _run_python(code, question):
+def _run_python(code, question, cancel_event=None):
     py = _python_exe()
     if not py:
         return None
     r = sandbox_run(
-        [py, "main.py"],
+        [os.path.realpath(py), "main.py"],
         stdin_data=_stdin_of(question),
         files={"main.py": code},
         wall=TIMEOUT_PY,
@@ -212,11 +271,12 @@ def _run_python(code, question):
         # 强制 UTF-8 输出（中文 Windows 默认 GBK 会乱码）；
         # 清空 PYTHONPATH，别让学生代码 import 到本项目自己的模块。
         env={"PYTHONIOENCODING": "utf-8", "PYTHONPATH": ""},
+        cancel_event=cancel_event,
     )
     return r
 
 
-def _run_cpp(code, question):
+def _run_cpp(code, question, cancel_event=None):
     cc = _find_cpp()
     if not cc:
         log.warning("服务器未安装 g++，代码题判分不可用")
@@ -226,17 +286,18 @@ def _run_cpp(code, question):
         [os.path.join(".", exe)],
         stdin_data=_stdin_of(question),
         files={"main.cpp": code},
-        compile_argv=[cc, "main.cpp", "-o", exe, "-std=c++14", "-O1"],
+        compile_argv=[os.path.realpath(cc), "main.cpp", "-o", exe, "-std=c++14", "-O1"],
         wall=TIMEOUT_RUN,
         cpu=TIMEOUT_RUN,
         mem_kb=MEM_LIMIT_KB,
         compile_wall=TIMEOUT_COMPILE,
         max_out=_out_limit(question),
+        cancel_event=cancel_event,
     )
     return r
 
 
-def _judge_code_inner(question, student_answer):
+def _judge_code_inner(question, student_answer, cancel_event=None):
     exp = str(question.get("expected_output") or "").strip()
     if not exp:
         return None                        # 没配期望输出 → 不启用运行判分
@@ -264,15 +325,15 @@ def _judge_code_inner(question, student_answer):
 
     lang = (question.get("language") or "python").strip().lower()
     if lang in ("c", "cpp", "c++"):
-        r = _run_cpp(code, question)
+        r = _run_cpp(code, question, cancel_event)
     else:
-        r = _run_python(code, question)
+        r = _run_python(code, question, cancel_event)
 
     if r is None:
         return None                        # 环境缺失（如没装 g++），压根没跑
     st = r.get("status")
-    if st == "se":
-        return None                        # 沙箱自身不可用 → 按没跑处理
+    if st in ("se", "cancelled"):
+        return "error" if st == "cancelled" else None
     if st != "ok":
         # TLE / MLE / RE / 编译失败：跑了但没得到正确输出 → 走按空给分回退
         return False
@@ -285,26 +346,118 @@ def _judge_code_inner(question, student_answer):
     return got == want
 
 
-def judge_code(question, student_answer):
+def _judge_key(question, student_answer):
+    payload = {
+        "id": question.get("id"),
+        "answer": [x.strip() for x in str(student_answer or "").split(BLANK_SEP)],
+        "code": question.get("code") or question.get("template") or "",
+        "language": (question.get("language") or "python").strip().lower(),
+        "expected_output": str(question.get("expected_output") or "").strip(),
+        "stdin": _stdin_of(question),
+        "ignore_case": bool(question.get("ignore_case")),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _cached_result(key):
+    now = time.monotonic()
+    with _result_lock:
+        item = _result_cache.get(key)
+        if item is None:
+            return False, None
+        if item[0] <= now:
+            _result_cache.pop(key, None)
+            return False, None
+        _result_cache.move_to_end(key)
+        return True, item[1]
+
+
+def _wait_flight(flight, cancel_event):
+    deadline = time.monotonic() + QUEUE_TIMEOUT + TIMEOUT_COMPILE + TIMEOUT_RUN + 5
+    while not flight["event"].is_set():
+        if cancel_event is not None and cancel_event.is_set():
+            return "error"
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return "error"
+        flight["event"].wait(min(0.1, left))
+    return flight["result"]
+
+
+def _acquire_gate(cancel_event):
+    deadline = time.monotonic() + QUEUE_TIMEOUT
+    while True:
+        if cancel_event is not None and cancel_event.is_set():
+            return False
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        if _gate.acquire(timeout=min(0.1, left)):
+            return True
+
+
+def judge_code(question, student_answer, cancel_event=None):
     """
     程序填空判题入口。
 
     返回 True / False / None / "error"（契约见模块 docstring）。
     """
-    # 排队：超配额就等，不拒绝。等太久才报 error。
-    acquired = _gate.acquire(timeout=QUEUE_TIMEOUT)
+    if cancel_event is not None and cancel_event.is_set():
+        return "error"
+    key = _judge_key(question, student_answer)
+    hit, result = _cached_result(key)
+    if hit:
+        return result
+
+    global _cache_generation
+    with _result_lock:
+        item = _result_cache.get(key)
+        if item is not None and item[0] > time.monotonic():
+            _result_cache.move_to_end(key)
+            return item[1]
+        if item is not None:
+            _result_cache.pop(key, None)
+        flight = _inflight.get(key)
+        owner = flight is None
+        if owner:
+            flight = {"event": threading.Event(), "result": "error"}
+            _inflight[key] = flight
+            generation = _cache_generation
+
+    if not owner:
+        return _wait_flight(flight, cancel_event)
+
+    acquired = _acquire_gate(cancel_event)
     if not acquired:
-        log.error("判题排队超过 %.0f 秒仍未拿到名额，qid=%s",
-                  QUEUE_TIMEOUT, question.get("id"))
-        return "error"
-    try:
-        return _judge_code_inner(question, student_answer)
-    except Exception:
-        # 判题机自身的 bug 不能静默吞掉（否则会退化成按空给分，老师发现不了）
-        log.exception("判题内部异常 qid=%s", question.get("id"))
-        return "error"
-    finally:
-        _gate.release()
+        result = "error"
+        if cancel_event is None or not cancel_event.is_set():
+            log.error("判题排队超过 %.0f 秒仍未拿到名额，qid=%s",
+                      QUEUE_TIMEOUT, question.get("id"))
+    else:
+        try:
+            if cancel_event is not None and cancel_event.is_set():
+                result = "error"
+            else:
+                result = _judge_code_inner(question, student_answer, cancel_event)
+        except Exception:
+            # 判题机自身的 bug 不能静默吞掉（否则会退化成按空给分，老师发现不了）
+            log.exception("判题内部异常 qid=%s", question.get("id"))
+            result = "error"
+        finally:
+            _gate.release()
+
+    with _result_lock:
+        flight["result"] = result
+        if _inflight.get(key) is flight:
+            _inflight.pop(key, None)
+        if result != "error" and generation == _cache_generation:
+            _result_cache[key] = (time.monotonic() + RESULT_CACHE_TTL, result)
+            _result_cache.move_to_end(key)
+            while len(_result_cache) > RESULT_CACHE_MAX:
+                _result_cache.popitem(last=False)
+        flight["event"].set()
+    return result
 
 
 if __name__ == "__main__":

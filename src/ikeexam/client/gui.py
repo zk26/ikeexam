@@ -17,6 +17,7 @@ if CLIENT_DIR not in sys.path:
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 from ikeexam.shared import ui_theme
+from ikeexam.shared.security import normalize_origin
 ui_theme.enable_high_dpi()
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -37,7 +38,10 @@ class SubmitQueue:
     定时来取（_pump_submit_events）。
     """
 
-    def __init__(self):
+    def __init__(self, client):
+        self.client = client
+        self.generation = client.generation
+        self.identity = client.identity
         self.items = []
         self.events = queue.Queue()
         # 事件：("progress", 已完成, 总数, 当前项名) / ("done", 成功行, 失败行)
@@ -53,15 +57,24 @@ class SubmitQueue:
         ok_lines, fail_lines = [], []
         total = len(self.items)
         for i, (label, fn) in enumerate(self.items):
+            if (self.generation != self.client.generation
+                    or self.identity != self.client.identity):
+                fail_lines.append(f"· {label}：考生身份已切换，未提交")
+                continue
             last_error = None
             for attempt in range(3):
+                if (self.generation != self.client.generation
+                        or self.identity != self.client.identity):
+                    last_error = RuntimeError("考生身份已切换")
+                    break
                 self.events.put(("progress", i, total,
                                  label if attempt == 0 else f"{label}（重试 {attempt}/3）"))
                 try:
                     result = fn()
                     if isinstance(result, dict) and result.get("ok") is False:
                         raise RuntimeError(result.get("msg") or "提交失败")
-                    ok_lines.append(f"· {label}：{result or '已提交'}")
+                    if result is not None:
+                        ok_lines.append(f"· {label}：{result or '已提交'}")
                     last_error = None
                     break
                 except Exception as exc:
@@ -71,7 +84,8 @@ class SubmitQueue:
             if last_error is not None:
                 fail_lines.append(f"· {label}：{last_error}")
         self.events.put(("progress", total, total, "完成"))
-        self.events.put(("done", ok_lines, fail_lines))
+        self.events.put(("done", ok_lines, fail_lines, self.identity,
+                         self.generation))
 
 # 双端共用设计令牌。
 _UI = ui_theme.LIGHT
@@ -188,8 +202,10 @@ class App:
 
         # 理论题状态
         self.sheet = None
+        self.exam_id = None
         self.vars = {}
         self._connected_once = False      # 是否曾成功连上（决定横幅措辞）
+        self._connect_running = False
         self.marked = set()               # 标记待复查的题号（0 起）
         self.card_btns = []               # 答题卡按钮：只建一次，之后只改颜色
         self._theory_exam_id = None       # 已加载的试卷属于哪场考试
@@ -205,6 +221,7 @@ class App:
             self._go_connect()
         else:
             self.swap(self.build_login)
+            self._go_connect()
 
     # ---------- 通用 ----------
     def drain_queue(self):
@@ -333,9 +350,9 @@ class App:
         if phase == "idle":
             return "wait"
 
-        # 考试已经在跑，但这台机器还没确认坐的是谁
-        # （上一场刚结束/刚开机）→ 先让学生填姓名座位号，别直接拉进考试
-        if not st.get("confirmed", True) and not section:
+        # 老师开启免密码考试时，按 IP 自动确认身份，学生无需操作。
+        ex = st.get("exam") or {}
+        if not st.get("confirmed", True) and not section and not ex.get("passwordless"):
             return "login"
 
         # 理论题和实操题是**同一个界面**的两个导航标签：开考直接进考试界面，
@@ -344,11 +361,11 @@ class App:
 
     def apply_state(self, force=False):
         """幂等：已经在正确的页面就什么都不做（不重建 = 不丢题号、不卡顿）"""
-        # 登录页/连接页是"人还没定下来"的状态：
-        # 这时老师开考也不该把这台机器拽进考试（坐着的可能是另一个同学），
-        # 等本人填完姓名座位号（走的是 force=True）再切页
+        # 普通考试在登录页等待本人确认；老师开启免密码考试时允许自动切页。
         if not force and self._current_page() in ("login", "connecting"):
-            return
+            ex = self.client.state.get("exam") or {}
+            if not ex.get("passwordless"):
+                return
         want = self.decide_page()
         if not force and want == self._current_page():
             return
@@ -434,12 +451,35 @@ class App:
         """心跳带来的状态更新（后台线程 → 主线程）"""
         self.uiq.put(self._sync_state)
 
+    def _current_task_label(self):
+        key = getattr(self, "cur_tab", None) or self._current_page()
+        sheet = getattr(self, "sheet", None)
+        if key in dict((tab, types) for tab, _label, types in self.THEORY_TABS):
+            question = sheet.current() if sheet is not None else None
+            if question:
+                return TYPE_LABEL.get(question.get("qtype"), question.get("qtype") or "")
+            return ""
+        if key == "practice":
+            tasks = self.client.practice_tasks()
+            if tasks:
+                index = min(max(0, int(getattr(self, "cur_task_idx", 0) or 0)), len(tasks) - 1)
+                task = tasks[index]
+                return wps.LABEL.get(task.get("etype"), task.get("name") or "实操题")
+            return "实操题"
+        for tab, label, _types in self.exam_tabs():
+            if tab == key:
+                return label
+        return ""
+
     def _report_progress(self):
         progress = {
             "section": getattr(self, "cur_tab", None) or self._current_page(),
             "status": ("working" if self.client.state.get("phase") in
                        ("theory", "practice", "paused") else "idle"),
         }
+        current_task = self._current_task_label()
+        if current_task:
+            progress["current_task"] = current_task
         sheet = getattr(self, "sheet", None)
         if sheet is not None and getattr(sheet, "questions", None):
             progress.update({
@@ -460,6 +500,14 @@ class App:
         self._last_sync = time.time()
         self._report_progress()
         if self._current_page() != "exam":
+            if self._current_page() == "login":
+                err = self.client.state.get("hello_error")
+                if err and hasattr(self, "login_tip"):
+                    try:
+                        self.login_tip.config(text=err, fg=RED)
+                    except Exception:
+                        pass
+            self.apply_state()
             return
         # 老师刚装了/删了操作题 → 顶部导航要跟着多出/少掉「实操题」标签
         want = [k for k, _l, _t in self.exam_tabs()]
@@ -522,7 +570,7 @@ class App:
         时间到了等于什么都不做。
         """
         threading.Thread(target=self._upload_drawing_quiet,
-                         args=(self.exam_id,), daemon=True).start()
+                         args=(self._current_exam_id(),), daemon=True).start()
         cur = self._current_page()
         if cur == "exam":
             if getattr(self, "cur_tab", None) == "practice":
@@ -685,9 +733,6 @@ class App:
                   bg=BLUE, fg=INK, font=(FONT, 14, "bold"),
                   width=24, pady=12, relief="flat", cursor="hand2",
                   activebackground=BLUE_D).pack(pady=(18, 8))
-        tk.Button(card, text="免密码进入（按 IP 识别）", command=self.do_passwordless,
-                  bg=CARD, fg=BLUE, font=(FONT, 11), width=24, pady=8,
-                  relief="flat", cursor="hand2").pack(pady=(0, 8))
 
         tk.Label(card, text=f"本机: {self.cfg.hostname}（标识 {self.cfg.client_id}）",
                  bg=CARD, fg=GRAY, font=(FONT, 9)).pack()
@@ -792,24 +837,20 @@ class App:
             self.e_seat.focus()
             return
 
+        self.client._prepare_identity_change()
         self.cfg.name = name
         self.cfg.seat = seat
         self.cfg.logged_in = True
         self.cfg.passwordless = False
-        self.cfg.save()
+        try:
+            self.cfg.save()
+        except Exception as exc:
+            self.login_tip.config(text=f"登录信息保存失败：{exc}", fg=RED)
+            return
+        self.client._refresh_identity(rebind=False)
         # 本人确认过身份了，接下来老师开考可以直接把他拉进去
         self.client.state["confirmed"] = True
 
-        self.swap(self.build_connecting)
-        self._go_connect()
-
-    def do_passwordless(self):
-        self.cfg.name = ""
-        self.cfg.seat = ""
-        self.cfg.logged_in = True
-        self.cfg.passwordless = True
-        self.cfg.save()
-        self.client.state["confirmed"] = True
         self.swap(self.build_connecting)
         self._go_connect()
 
@@ -857,13 +898,20 @@ class App:
 
     def _go_connect(self):
         """后台线程找服务器，避免界面卡住"""
+        if getattr(self, "_connect_running", False):
+            return
+        self._connect_running = True
+
         def run():
-            ok = self.client.start(on_status=self.on_status)
-            if ok:
-                self._connected_once = True
-                self.uiq.put(self._on_connected)
-            else:
-                self.uiq.put(self._on_connect_failed)
+            try:
+                ok = self.client.start(on_status=self.on_status)
+                if ok:
+                    self._connected_once = True
+                    self.uiq.put(self._on_connected)
+                else:
+                    self.uiq.put(self._on_connect_failed)
+            finally:
+                self._connect_running = False
         threading.Thread(target=run, daemon=True).start()
 
     def retry_connect(self):
@@ -891,10 +939,9 @@ class App:
 
     def _on_connected(self):
         """连接成功后：没考试就在等待页，有考试按状态进对应页面"""
-        exam = self.client.state.get("exam")
-        # 还停在登录页说明本人还没确认身份（可能正准备换考生），
-        # 这时老师开考也不能把这台机器拽进去
-        if self._current_page() == "login":
+        exam = self.client.state.get("exam") or {}
+        # 普通考试仍等待本人登录；免密码考试由老师开考时直接确认身份。
+        if self._current_page() == "login" and not exam.get("passwordless"):
             return
         if not exam:
             self.swap(self.build_wait)
@@ -911,12 +958,107 @@ class App:
         self._last_sync = time.time()
         self.apply_state(force=True)
         self._sync_state()
+        self._resume_submission_outbox(exam.get("id"))
+
+    def _resume_submission_outbox(self, exam_id):
+        if not exam_id or self.client.state.get("submitting"):
+            return
+        records = self.client.outbox.records(
+            self.client.identity, principal=self.client.principal)
+        final_key = self.client.submission_key("final", exam_id)
+        if self.client.outbox.record(final_key) is None:
+            return
+        self.client.typing_state(restore=True)
+        records = [(key, record) for key, record in records
+                   if str((record.get("data") or {}).get("exam_id")) == str(exam_id)
+                   and record.get("kind") != "final"]
+        jobs = []
+        for key, record in records:
+            data = record.get("data") or {}
+            kind = record.get("kind")
+            if kind == "theory":
+                payload = data.get("answers") or {}
+
+                def theory(p=payload, k=key):
+                    result = self.client.api.submit_theory(exam_id, p)
+                    if not result.get("ok"):
+                        raise RuntimeError(result.get("msg") or "理论题提交失败")
+                    result = self.client.api.finish_theory(exam_id)
+                    if not result.get("ok"):
+                        raise RuntimeError(result.get("msg") or "理论题交卷失败")
+                    self.client.outbox.remove(k)
+                    return "已恢复并提交"
+                jobs.append(("理论题答案", theory))
+            elif kind == "typing":
+                reports = data.get("reports") or []
+
+                def typing(payload=reports, k=key):
+                    result = self.client.api.typing_report(exam_id, payload)
+                    if not result.get("ok"):
+                        raise RuntimeError(result.get("msg") or "打字成绩提交失败")
+                    self.client.outbox.remove(k)
+                    return "已恢复并提交"
+                jobs.append(("打字练习记录", typing))
+            elif kind == "drawing":
+                import base64
+                try:
+                    payload = base64.b64decode(data.get("data") or "", validate=True)
+                except Exception:
+                    continue
+                draw_kind = data.get("kind") or "draw"
+
+                def drawing(d=payload, k=key, style=draw_kind, ext=data.get("ext") or ".png"):
+                    result = self.client.api.upload_drawing(
+                        exam_id, d, ext, kind=style)
+                    if not result.get("ok"):
+                        raise RuntimeError(result.get("msg") or "图片提交失败")
+                    self.client.outbox.remove(k)
+                    return "已恢复并提交"
+                jobs.append(("画图作品", drawing))
+        for task in self.client.practice_tasks() or []:
+            if task.get("submitted"):
+                continue
+
+            def practice(t=task):
+                ok, info = self.client.auto_submit(t, allow_empty=True)
+                if not ok:
+                    raise RuntimeError(info or "实操题提交失败")
+                return "已恢复并提交"
+            jobs.append((f"实操「{task.get('name') or task.get('no')}」", practice))
+        if not jobs:
+            if self.client.pending_submission_records(exam_id):
+                messagebox.showwarning("仍有待提交内容", "本地还有未能恢复的答卷记录，未标记为交卷成功。")
+                return
+            self.client.outbox.remove(final_key)
+            self.client.mark_submitted(exam_id)
+            return
+        self.client.state["submitting"] = True
+        q = SubmitQueue(self.client)
+        for label, function in jobs:
+            q.add(label, function)
+        self._submit_identity = (self.client.identity, self.client.generation)
+        self._submit_final_key = final_key
+        self._submit_evq = q.start()
+        self._build_submitting(len(jobs))
+        self.root.after(100, self._pump_submit_events)
 
     def _on_connect_failed(self):
         """自动寻找失败 → 给手动输入的入口"""
+        err = (self.client.state or {}).get("hello_error") or ""
+        if self._current_page() == "login":
+            try:
+                self.login_tip.config(
+                    text=err or "正在自动寻找老师端，找到后会自动进入免密码考试…",
+                    fg=RED if err else GRAY)
+            except Exception:
+                pass
+            def retry():
+                if self._current_page() == "login":
+                    self._go_connect()
+            self.root.after(5000, retry)
+            return
         # 服务端明确拒了（比如姓名不在本场名单里）：把原因显示出来，
         # 并给一个「改姓名/座位号」的入口，别让学生卡在连接页
-        err = (self.client.state or {}).get("hello_error") or ""
         if err:
             try:
                 self.conn_status.config(
@@ -972,10 +1114,13 @@ class App:
                 tip.config(text="请填写服务器地址。", fg=RED)
                 e.focus_set()
                 return
-            if not url.startswith("http"):
-                url = "http://" + url
-            self.cfg.server = url.rstrip("/")
-            self.cfg.fallback = url.rstrip("/")
+            try:
+                url = normalize_origin(url, allow_plain_http=True)
+            except ValueError as exc:
+                tip.config(text=str(exc), fg=RED)
+                return
+            self.cfg.server = url
+            self.cfg.fallback = url
             self.cfg.save()
             self.client.cfg.server = self.cfg.server
             tip.config(text="正在连接服务器…", fg=BLUE)
@@ -991,18 +1136,20 @@ class App:
             def done(result):
                 if not win.winfo_exists():
                     return
-                if not result.get("ok"):
-                    tip.config(text=f"连接失败：{result.get('msg', '未知原因')}。"
+                hello = result.get("hello") or {}
+                if (not result.get("ok") or not isinstance(hello, dict)
+                        or not hello.get("ok", True)):
+                    message = hello.get("msg") if isinstance(hello, dict) else None
+                    tip.config(text=f"连接失败：{message or result.get('msg') or '服务器拒绝了登录'}。"
                                     "请检查地址和网络后重试。", fg=RED)
                     connect_btn.config(state="normal")
                     return
                 self.client.api = result["api"]
-                hello = result.get("hello") or {}
-                self.client.state["server_name"] = hello.get("server_name", "")
-                self.client.state["exam"] = hello.get("exam")
-                self.client.state["phase"] = hello.get("phase")
-                self.client.state["materials"] = (
-                    hello.get("exam") or {}).get("materials") or []
+                if not self.client._accept_hello(hello):
+                    tip.config(text=self.client.state.get("hello_error") or "登录失败",
+                               fg=RED)
+                    connect_btn.config(state="normal")
+                    return
                 win.destroy()
                 self._connected_once = True
                 self._on_connected()
@@ -1207,6 +1354,7 @@ class App:
     def build_exam(self):
         """考试界面外壳：顶部导航 + 内容区"""
         exam = self.client.state.get("exam") or {}
+        self.exam_id = self._current_exam_id()
         title = exam.get("title") or "考试"
 
         tabs = self.exam_tabs()
@@ -1307,7 +1455,7 @@ class App:
         """切导航标签：只重建内容区，不重载试卷、不丢答案"""
         self._cancel_auto_next()
         # 提交中 / 已交卷：禁止进入新页面（防止交卷后再改答案）
-        if self.client.state.get("submitting") or self.client.state.get("submitted"):
+        if self.client.state.get("submitting") or self.client.is_submitted(self.exam_id):
             return
         self._user_tab = True         # 学生自己选的，别再自动跳回理论题
         # 告诉 client 现在在哪一块：严格模式下要用它决定
@@ -1420,11 +1568,13 @@ class App:
                 cls = DrawingPanel
             # 画的内容存在 client.drawing_state(kind)（跨标签共享），切页不丢画
             # 右上角「上一题/下一题」在整个考试序列里前后走
+            next_label = self._drawing_next_label(kind)
             self.drawing_panel = cls(parent, self.client, cfg,
                                      on_save=self._save_drawing,
                                      on_prev=self._drawing_prev,
-                                     on_next=lambda k=kind: self._drawing_next(k),
-                                     next_label=self._drawing_next_label(kind))
+                                     on_next=(lambda k=kind: self._drawing_next(k))
+                                     if next_label else None,
+                                     next_label=next_label)
             self.drawing_panel.pack(fill="both", expand=True)
         except Exception as e:
             print(f"[画图] 面板加载失败: {e}", flush=True)
@@ -1438,6 +1588,10 @@ class App:
         完成后回主线程调 done(ok, msg) 刷新指示灯。
         ⚠️ 上传线程不碰 Tk，回调走 uiq（和 SubmitQueue 同一套约定）。
         """
+        exam_id = self._current_exam_id()
+        if not exam_id:
+            done(False, "尚未进入考试，无法保存画板作品")
+            return
         try:
             data, ext = panel.export_png()
         except Exception as e:
@@ -1447,7 +1601,7 @@ class App:
         def work():
             try:
                 r = self.client.api.upload_drawing(
-                    self.exam_id, data, ext,
+                    exam_id, data, ext,
                     kind=getattr(panel, "kind", "draw"))
                 ok = bool(r.get("ok"))
                 msg = r.get("msg") or ""
@@ -1474,37 +1628,32 @@ class App:
                 if s in self.client.drawing_styles()]
 
     def _typing_tail_nav(self):
-        """
-        打字任务全部做完后，底部「下一题」去哪：
-        有画图题 → 跳画板创作（或拼豆创作）；没有 → 「▶ 去交卷」。
-        返回 (按钮文字, 回调)，交给 TypingPanel 的尾部导航。
-        """
+        """打字结束后的下一题导航；没有后续题型时只保留顶部交卷按钮。"""
         labels = {"draw": "画板创作", "beads": "拼豆创作"}
         order = self._drawing_order()
         if order:
-            s = order[0]
-            return (f"下一题：{labels[s]} ▶", lambda s=s: self.switch_tab(s))
-        return ("▶ 去交卷", self.submit_all)
+            style = order[0]
+            return (f"下一题：{labels[style]} ▶",
+                    lambda style=style: self.switch_tab(style))
+        return None
 
     def _drawing_next(self, kind):
-        """画图右上角「下一题」：去下一种画图小题，画板/拼豆都做完就去交卷"""
+        """画图右上角「下一题」：只切换到下一种画图小题。"""
         order = self._drawing_order()
         if kind in order:
             rest = order[order.index(kind) + 1:]
             if rest:
                 self.switch_tab(rest[0])
-                return
-        self.submit_all()
 
     def _drawing_next_label(self, kind):
-        """画图右上角「下一题」按钮文字（跟着下一个目标变）"""
+        """画图右上角是否存在下一题按钮。"""
         labels = {"draw": "画板创作", "beads": "拼豆创作"}
         order = self._drawing_order()
         if kind in order:
             rest = order[order.index(kind) + 1:]
             if rest:
                 return f"下一题：{labels[rest[0]]} ▶"
-        return "▶ 去交卷"
+        return None
 
     # ---------- 理论题选项图片（img:文件名.png 选项文字） ----------
     @staticmethod
@@ -1532,7 +1681,9 @@ class App:
         cache = getattr(self, "_img_cache", None)
         if cache is None:
             cache = self._img_cache = {}
-        hit = cache.get(name)
+        cache_key = (self.client.identity, self.client.generation,
+                     (self.client.state.get("exam") or {}).get("id"), name)
+        hit = cache.get(cache_key)
         if hit:
             setter(hit)
             return
@@ -1548,6 +1699,8 @@ class App:
                 print(f"[选项图片] {name} 加载失败: {e}", flush=True)
 
             def done():
+                if cache_key[:2] != (self.client.identity, self.client.generation):
+                    return
                 photo = None
                 if raw:
                     try:
@@ -1555,7 +1708,7 @@ class App:
                         photo = tk.PhotoImage(data=base64.b64encode(raw))
                     except Exception:
                         photo = None
-                self._img_cache[name] = photo if photo else False
+                self._img_cache[cache_key] = photo if photo else False
                 if photo:
                     try:
                         setter(photo)
@@ -1621,6 +1774,8 @@ class App:
         if getattr(self, "_paper_loading", False):
             return
         self._paper_loading = True
+        paper_generation = self.client.generation
+        paper_identity = self.client.identity
 
         def fetch():
             r = None
@@ -1635,14 +1790,18 @@ class App:
                     time.sleep(1)
             self._paper_loading = False
             if r and r.get("ok"):
-                self.uiq.put(lambda: self._got_paper(r))
+                self.uiq.put(lambda: self._got_paper(r, paper_generation, paper_identity))
             else:
                 msg = (r or {}).get("msg", "无法获取试卷")
-                self.uiq.put(lambda: self._show_paper_error(msg))
+                self.uiq.put(lambda: self._show_paper_error(msg, paper_generation,
+                                                            paper_identity))
         threading.Thread(target=fetch, daemon=True).start()
 
-    def _got_paper(self, r):
+    def _got_paper(self, r, generation=None, identity=None):
         from exam_client import AnswerSheet
+        if generation is not None and (generation != self.client.generation
+                                        or identity != self.client.identity):
+            return
         new_exam = (self._theory_exam_id != r["exam_id"])
         self.sheet = AnswerSheet(r["questions"])
         self.sheet.load_saved(r.get("answered") or {})
@@ -1653,7 +1812,9 @@ class App:
             self.marked = set()
         # 答案同步器：本地即时保存，每 10 秒批量上传
         sync = self.client.begin_answer_sync(self.exam_id)
-        sync.on_saved = self._on_answers_saved
+        sync.on_saved = lambda count, g=sync.generation, i=sync.identity: (
+            self._on_answers_saved(count) if g == self.client.generation
+            and i == self.client.identity else None)
         # 换了一场考试：标签回到默认（理论题优先）。
         # "学生点过哪个标签"是按场次算的 —— 上一场他选过实操题，
         # 不该影响这一场；同一场里重新拉试卷则保持他选的那个。
@@ -1672,8 +1833,11 @@ class App:
         # 否则心跳/超时都会以为"不在考试页"，时间到不会自动交卷
         self._set_page("exam")
 
-    def _show_paper_error(self, msg):
+    def _show_paper_error(self, msg, generation=None, identity=None):
         """试卷加载失败"""
+        if generation is not None and (generation != self.client.generation
+                                        or identity != self.client.identity):
+            return
         for w in self.content.winfo_children():
             w.destroy()
         card = tk.Frame(self.content, bg=CARD, padx=40, pady=30,
@@ -2320,7 +2484,7 @@ class App:
         self._auto_next_job = None
         if (self._current_page() != "exam" or not self.sheet
                 or self.client.state.get("submitting")
-                or self.client.state.get("submitted")):
+                or self.client.is_submitted(self.exam_id)):
             return
         self.next_q()
 
@@ -2453,7 +2617,7 @@ class App:
         """
         ok = True
         try:
-            eid = self.exam_id or exam_id
+            eid = exam_id or self._current_exam_id()
             if self.sheet and self.sheet.total() and eid:
                 if self.client.flush_answers() is False:
                     ok = False
@@ -2492,22 +2656,8 @@ class App:
             self._log_only(f"强制交卷出错: {e}")
         return ok
 
-    def submit_all(self):
-        """
-        导航栏上的「交卷」：不管在哪个页面点，都一次性提交全部内容
-        （理论题 + 全部实操题 + 打字练习的统计 + 画板作品）。
-        没做完的先列出来提醒；老师设了「未做完禁止提交」就直接拦住。
-        提交走等待队列：全部上传完才显示成功页，中途禁止切去别的页面。
-        """
-        if self.client.state.get("submitting"):
-            messagebox.showinfo("正在提交", "正在提交中，请稍等，不要重复点击。")
-            return
-        if self.client.state.get("submitted"):
-            messagebox.showinfo("已交卷",
-                                "你已经交过卷了，请等待老师结束考试。")
-            return
+    def _unfinished_items(self):
         tasks = self.client.practice_tasks() or []
-        # ---- 0) 先检查做完没有 ----
         missing = []
         if self.sheet and self.sheet.total():
             un = self.sheet.unanswered()
@@ -2517,13 +2667,14 @@ class App:
                 if len(un) > 8:
                     msg += "…"
                 missing.append(msg + " 题）")
-        for t in tasks:
-            name = t.get("name") or f"实操题 {t.get('no', '')}"
+        for task in tasks:
+            name = task.get("name") or f"实操题 {task.get('no', '')}"
+            exam_id = self._current_exam_id()
             try:
-                done = (bool(self.client.collected_answer(self.exam_id, t))
-                        or bool(self.client.pending_answer(self.exam_id, t)[0]))
+                done = (bool(self.client.collected_answer(exam_id, task))
+                        or bool(self.client.pending_answer(exam_id, task)[0]))
             except Exception:
-                done = bool(t.get("submitted"))
+                done = bool(task.get("submitted"))
             if not done:
                 missing.append(f"实操题「{name}」还没有答卷")
         for name in self._typing_unfinished():
@@ -2533,52 +2684,88 @@ class App:
             if not drawing_ui.state_has_art(self.client.drawing_state(kind)):
                 missing.append("拼豆创作：还什么都没有拼" if kind == "beads"
                                else "画板创作：还什么都没有画")
+        return missing
+
+    def _confirm_submission(self):
         require = bool((self.client.state.get("exam") or {}).get("require_complete"))
-        if missing:
-            detail = "\n".join("· " + m for m in missing)
-            if require:
-                # 老师设置了「未做完禁止提交」→ 直接拦下
+        if require:
+            missing = self._unfinished_items()
+            if missing:
+                detail = "\n".join("· " + item for item in missing)
                 messagebox.showwarning(
                     "不能交卷",
                     "老师设置了「未做完禁止提交」，以下内容还没有做完：\n\n"
                     + detail + "\n\n请完成后再点「交卷」。")
-                return
-            # 老师没设置 → 提醒后学生可以自己决定交不交
-            if not messagebox.askyesno(
-                    "确认交卷",
-                    "以下内容还没有做完：\n\n" + detail
-                    + "\n\n仍要交卷吗？\n"
-                      "点「是」就一次性全部交卷：没做的题不会再让你重做，"
-                      "直接按 0 分计（老师端的成绩和评讲里会标成「缺卷」）。"):
-                return
-        elif not messagebox.askyesno(
-                "确认交卷",
-                "交卷将一次性提交全部成绩（理论题 + 全部实操题 + 打字练习）。\n\n"
-                "确定交卷吗？"):
+                return False
+        return messagebox.askyesno(
+            "确认交卷",
+            "交卷将一次性提交全部成绩（理论题 + 全部实操题 + 打字练习）。\n\n"
+            "确定交卷吗？")
+
+    def submit_all(self):
+        """
+        导航栏上的「交卷」：不管在哪个页面点，都一次性提交全部内容
+        （理论题 + 全部实操题 + 打字练习的统计 + 画板作品）。
+        老师开启「未做完禁止提交」时才检查并拦截；否则没做题直接按缺卷提交。
+        提交走等待队列：全部上传完才显示成功页，中途禁止切去别的页面。
+        """
+        import drawing_ui
+        submission_exam = self._current_exam_id()
+        if not submission_exam:
+            messagebox.showerror("交卷失败", "尚未进入考试，无法交卷。")
+            return
+        self.exam_id = submission_exam
+        if self.client.state.get("submitting"):
+            messagebox.showinfo("正在提交", "正在提交中，请稍等，不要重复点击。")
+            return
+        if self.client.is_submitted(submission_exam):
+            messagebox.showinfo("已交卷",
+                                "你已经交过卷了，请等待老师结束考试。")
+            return
+        tasks = self.client.practice_tasks() or []
+        if not self._confirm_submission():
             return
         # ---- 收集要提交的东西（主线程收集，后台队列只负责上传）----
         jobs = []
+        submission_identity = self.client.identity
+        final_key = self.client.submission_key("final", submission_exam)
         has_theory = bool(self.sheet and self.sheet.total())
         if has_theory:
             try:
-                self.client.flush_answers()
+                if self.client.flush_answers() is False:
+                    messagebox.showerror("交卷失败", "理论题答案尚未同步，请恢复网络后重试。")
+                    return
                 payload = self.sheet.payload()
             except Exception as e:
                 messagebox.showerror("交卷失败", f"理论题答案打包失败：{e}")
                 return
 
+            answer_key = self.client.submission_key("final-theory", submission_exam)
+            self.client.outbox.put(answer_key, submission_identity, "theory",
+                                   {"exam_id": submission_exam, "answers": payload},
+                                   principal=self.client.principal)
+
             def up_theory(p=payload):
-                result = self.client.api.submit_theory(self.exam_id, p)
+                result = self.client.api.submit_theory(submission_exam, p)
                 if not result.get("ok"):
                     raise RuntimeError(result.get("msg") or "理论题提交失败")
-                result = self.client.api.finish_theory(self.exam_id)
+                result = self.client.api.finish_theory(submission_exam)
                 if not result.get("ok"):
                     raise RuntimeError(result.get("msg") or "理论题交卷失败")
+                self.client.outbox.remove(answer_key)
                 return "已提交"
             jobs.append(("理论题答案", up_theory))
         if self.client.typing_config():
+            typing_key = self.client.submission_key("final-typing", submission_exam)
+            reports = self.client.typing_reports()
+            self.client.outbox.put(typing_key, submission_identity, "typing",
+                                   {"exam_id": submission_exam, "reports": reports},
+                                   principal=self.client.principal)
+
             def up_typing():
-                self.client.flush_typing()
+                if self.client.flush_typing(final=True) is False:
+                    raise RuntimeError("打字成绩同步失败")
+                self.client.outbox.remove(typing_key)
                 return "已提交最新成绩"
             jobs.append(("打字练习记录", up_typing))
         for t in tasks:
@@ -2592,7 +2779,7 @@ class App:
                 auto = info or {}
                 t["submitted"] = True
                 if auto.get("empty"):
-                    return "没做，缺卷按 0 分处理"
+                    return None
                 if auto.get("pending"):
                     return "已提交，正在后台评分"
                 s = auto.get("score")
@@ -2611,16 +2798,34 @@ class App:
                     f"{'拼豆' if kind == 'beads' else '画板'}导出失败：{e}")
                 return
 
-            def up_draw(d=data, e=ext, k=kind):
-                r = self.client.api.upload_drawing(self.exam_id, d, e, kind=k)
+            import base64
+            drawing_key = self.client.submission_key(
+                f"final-drawing-{kind}", submission_exam)
+            self.client.outbox.put(
+                drawing_key, submission_identity, "drawing",
+                {"exam_id": submission_exam, "kind": kind, "ext": ext,
+                 "data": base64.b64encode(data).decode("ascii")},
+                principal=self.client.principal)
+
+            def up_draw(d=data, e=ext, k=kind, key=drawing_key):
+                r = self.client.api.upload_drawing(submission_exam, d, e, kind=k)
                 if not r.get("ok"):
                     raise RuntimeError(r.get("msg") or "上传失败")
+                self.client.outbox.remove(key)
                 return f"已提交（{len(d) // 1024} KB）"
             jobs.append(("拼豆作品" if kind == "beads" else "画板作品",
                          up_draw))
 
+        self.client.outbox.put(final_key, submission_identity, "final",
+                               {"exam_id": submission_exam},
+                               principal=self.client.principal)
         if not jobs:
-            self.client.state["submitted"] = True
+            if self.client.pending_submission_records(submission_exam):
+                messagebox.showerror("交卷失败", "本地仍有未能恢复的答卷记录，未标记为交卷成功。")
+                self.client.outbox.remove(final_key)
+                return
+            self.client.outbox.remove(final_key)
+            self.client.mark_submitted(submission_exam)
             self._show_submit_success([], [])
             return
 
@@ -2629,9 +2834,11 @@ class App:
 
         try:
             self._build_submitting(len(jobs))
-            q = SubmitQueue()
+            q = SubmitQueue(self.client)
             for label, fn in jobs:
                 q.add(label, fn)
+            self._submit_identity = (submission_identity, self.client.generation)
+            self._submit_final_key = final_key
             self._submit_evq = q.start()
             self.root.after(100, self._pump_submit_events)
         except Exception as e:
@@ -2659,6 +2866,9 @@ class App:
                 if ev[0] == "progress":
                     self._set_submit_progress(ev[1], ev[2], ev[3])
                 elif ev[0] == "done":
+                    if len(ev) < 5 or ev[3:5] != (self.client.identity,
+                                                  self.client.generation):
+                        continue
                     self._submit_evq = None
                     self._submit_finished(ev[1], ev[2])
                     alive = False
@@ -2707,11 +2917,22 @@ class App:
                 pass
 
     def _submit_finished(self, ok_lines, fail_lines):
+        current = (self.client.identity, self.client.generation)
         self.client.state["submitting"] = False
+        if current != getattr(self, "_submit_identity", current):
+            self._submit_evq = None
+            return
         if fail_lines:
             self._build_submit_failed(ok_lines, fail_lines)
         else:
-            self.client.state["submitted"] = True
+            key = getattr(self, "_submit_final_key", None)
+            pending = self.client.pending_submission_records(self.exam_id)
+            if key and not pending:
+                self.client.outbox.remove(key)
+            if pending:
+                self._build_submit_failed(ok_lines, ["· 仍有待提交内容，请恢复网络后重试"])
+                return
+            self.client.mark_submitted(self.exam_id)
             self._show_submit_success(ok_lines, fail_lines)
 
     def _build_submit_failed(self, ok_lines, fail_lines):
@@ -3147,30 +3368,42 @@ class App:
 
     def _download_task(self, task, then=None, force=False):
         """① 下载素材（带进度条）。then(got_paths)：下完后再做别的事"""
+        generation = self.client.generation
+        identity = self.client.identity
+        exam_id = self.exam_id
+
+        def current():
+            return (generation == self.client.generation
+                    and identity == self.client.identity
+                    and exam_id == self.exam_id)
+
         def run():
             try:
                 def on_prog(i, n, name, got, total):
                     pct = int(got * 100 / total) if total else 0
-                    self.uiq.put(lambda p=pct, nm=name, a=i, b=n: self._set_dl(
-                        p, f"正在下载 {nm}（{a}/{b}）{p}%", BLUE))
+                    self.uiq.put(lambda p=pct, nm=name, a=i, b=n: (
+                        self._set_dl(p, f"正在下载 {nm}（{a}/{b}）{p}%", BLUE)
+                        if current() else None))
 
                 have = self._local_materials(task)
                 if have and not force:
                     # 已经在本机了，直接提示，别重复下载
                     self.uiq.put(lambda: self._set_dl(
-                        100, f"素材已在本机（{len(have)} 个），可直接打开", GREEN))
-                    if then:
-                        self.uiq.put(lambda: then(have))
+                        100, f"素材已在本机（{len(have)} 个），可直接打开", GREEN)
+                        if current() else None)
+                    if then and current():
+                        self.uiq.put(lambda: then(have) if current() else None)
                     return
                 got = self.client.fetch_materials(self.exam_id, task,
                                                   on_progress=on_prog, force=force)
                 # 下完重新扫一遍目录：状态标签跟着变，切题回来也不会又写"尚未下载"
-                self.uiq.put(lambda: self.refresh_task_state(task))
-                if then:
-                    self.uiq.put(lambda: then(got))
+                self.uiq.put(lambda: self.refresh_task_state(task)
+                             if current() else None)
+                if then and current():
+                    self.uiq.put(lambda: then(got) if current() else None)
             except Exception as e:
                 self.uiq.put(lambda: self._set_dl(
-                    None, f"下载失败：{e}", RED))
+                    None, f"下载失败：{e}", RED) if current() else None)
         self._set_dl(0, "准备下载…", BLUE)
         threading.Thread(target=run, daemon=True).start()
 
@@ -3401,14 +3634,31 @@ class App:
                 pass
             return
         try:
-            self.client.flush_answers()
+            if self.client.flush_answers() is False:
+                messagebox.showerror("无法切换考生", "旧考生的答案尚未同步，请恢复网络后重试。")
+                return
             self.client.stop_answer_sync()
-        except Exception:
-            pass
+            self.client.stop()
+        except Exception as exc:
+            messagebox.showerror("无法切换考生", f"旧考生的答案同步失败：{exc}")
+            return
+        self.client._stop.clear()
         # 清掉本地考试痕迹（服务器上的答卷不受影响）
         st = self.client.state
+        st["submitted"] = False
+        st["submitted_key"] = None
+        st["submitting"] = False
+        self._img_cache = {}
         st["exam"] = None
+        st["phase"] = "idle"
+        st["remaining"] = None
         st["section"] = None
+        st["materials"] = []
+        st["typing"] = None
+        st["drawing"] = None
+        st["ui_progress"] = {}
+        st["exam_started_at"] = None
+        st.pop("hello_error", None)
         st["ended_exam_id"] = None
         st["theory_answered"] = 0
         st["theory_total"] = 0
@@ -3430,8 +3680,10 @@ class App:
             self.cfg.logged_in = False
             self.cfg.passwordless = False
             self.cfg.save()
-        except Exception:
-            pass
+            self.client._refresh_identity(rebind=False)
+        except Exception as exc:
+            messagebox.showerror("无法切换考生", f"登录状态清理失败：{exc}")
+            return
         self.swap(self.build_login)
 
     def run(self):

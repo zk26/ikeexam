@@ -111,7 +111,7 @@ def _new_stats(task, cfg):
     return {"task": task, "progress": 0, "total": total, "hits": 0,
             "typed": 0, "correct_chars": 0, "elapsed_ms": 0,
             "wpm": 0.0, "accuracy": 0.0, "reaction_ms": 0,
-            "finished": 0, "errors": 0}
+            "finished": 0, "errors": 0, "attempt": 0}
 
 
 def _is_cjk(text):
@@ -1068,6 +1068,7 @@ class WhackMoleTask(tk.Frame):
         self.st = panel.stats[task]
         self.st["total"] = self.rounds * len(self.level_seq)
         self.finished = bool(self.st.get("finished"))
+        self.started = False
         self.li = 0                    # 第几关（level_seq 下标）
         self.pop_no = 0                # 本关第几只
         # 洞口布局：老师可配（3x3 / 3x4 / 4x4 / 4x5 / 5x5），默认 3×3
@@ -1123,7 +1124,8 @@ class WhackMoleTask(tk.Frame):
                 self.canvas.config(cursor="none")
             except Exception:
                 pass
-        self.canvas.pack(pady=10)
+        self.canvas.pack(fill="both", expand=True, pady=10)
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
         self.canvas.bind("<Button-1>", self._on_click)
         if self.hammer_up:
             self.hammer_id = self.canvas.create_image(
@@ -1162,6 +1164,29 @@ class WhackMoleTask(tk.Frame):
         self._afters = []
 
     # ---------- 场地绘制 ----------
+    def _on_canvas_resize(self, event):
+        width = max(320, int(event.width))
+        height = max(220, int(event.height))
+        if width == self.cv_w and height == self.cv_h:
+            return
+        was_up = self.mole_up
+        self._clear_afters()
+        self.cv_w, self.cv_h = width, height
+        self._holes = self._layout_holes()
+        for tag in ("mound", "hole", "mole", "fx", "banner"):
+            self.canvas.delete(tag)
+        self._draw_field()
+        self.mole_up = False
+        self.mole_bbox = None
+        if self.finished:
+            self._show_summary()
+        elif not self.started:
+            self._after(self._start_level, 300, self.li)
+        elif was_up:
+            self._escape()
+        else:
+            self._after(self._pop_next, 300)
+
     def _layout_holes(self):
         """洞位中心坐标（行列数跟着老师配的布局走）"""
         w, h = self.cv_w, self.cv_h
@@ -1180,8 +1205,8 @@ class WhackMoleTask(tk.Frame):
         """草地 + 土堆 + 洞口（洞口有 tag，随时抬到地鼠上层做遮挡）"""
         cv = self.canvas
         # 土堆/洞口大小跟着格子缩放：格子多了不能挤成一团
-        mw = min(78, self.cell_w * 0.44)
-        mh = max(15, min(26, self.cell_h * 0.16))
+        mw = min(150, self.cell_w * 0.44)
+        mh = max(18, min(60, self.cell_h * 0.20))
         hw, hh = mw * 0.74, max(10, mh * 0.66)
         for hx, hy in self._holes:
             cv.create_oval(hx - mw, hy - mh, hx + mw, hy + mh * 1.15,
@@ -1195,6 +1220,7 @@ class WhackMoleTask(tk.Frame):
     def _start_level(self, li):
         if not self.winfo_exists() or self.finished:
             return
+        self.started = True
         self.li = li
         self.pop_no = 0
         key = self.level_seq[li]
@@ -1232,6 +1258,8 @@ class WhackMoleTask(tk.Frame):
         self._last_hole = i
         hx, hy = holes[i]
         size = max(18, int(p.get("size") or 44))
+        scale = min(2.2, max(0.8, min(self.cell_w / 150, self.cell_h / 90)))
+        size = int(size * scale)
         # 格子多的时候地鼠别盖住隔壁的洞
         try:
             size = max(18, int(min(size, self.cell_w * 0.52, self.cell_h * 0.95)))
@@ -1581,7 +1609,9 @@ class TypingPanel(tk.Frame):
         cfg = dict(self.cfg.get(task) or {})
         if extras:
             cfg.update(extras)
+        previous = self.stats.get(task) or {}
         self.stats[task] = _new_stats(task, cfg)
+        self.stats[task]["attempt"] = int(previous.get("attempt") or 0) + 1
         if task == self.task:
             self.reload()
 

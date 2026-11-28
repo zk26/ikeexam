@@ -42,6 +42,13 @@ response = client.post("/api/theory/submit", headers=auth,
 assert response.get_json().get("ok"), response.get_json()
 assert db.theory_score(eid, "LOCK-PC", hello["participant_id"])[0] == 5
 
+updated = client.post("/admin_api/students/update", headers=headers,
+                      json={"hostname": "LOCK-PC", "name": "小明更正", "seat": "01A"})
+assert updated.status_code == 200, updated.get_json()
+rows = db.full_report(eid)
+assert len(rows) == 1 and rows[0]["name"] == "小明更正" and rows[0]["seat"] == "01A", rows
+assert rows[0]["theory"] == 5, rows
+
 stop = client.post(f"/admin_api/exam/{eid}/stop", headers=headers,
                    json={"clear_login": True})
 assert stop.status_code == 200
@@ -50,7 +57,7 @@ client.post("/api/hello", json={"host": "LOCK-PC", "name": "小红",
             environ_base={"REMOTE_ADDR": "192.168.1.21"})
 rows = db.full_report(eid)
 assert len(rows) == 1, rows
-assert rows[0]["name"] == "小明" and rows[0]["seat"] == "01"
+assert rows[0]["name"] == "小明更正" and rows[0]["seat"] == "01A"
 assert rows[0]["ip"] == "192.168.1.20" and rows[0]["theory"] == 5
 locked = client.put(f"/admin_api/exam/{eid}", headers=headers,
                     json={"title": "不应修改", "duration": 31})
@@ -86,6 +93,9 @@ for path in (f"/exam/{eid}/delete", f"/exam/{eid}/start",
 copy = client.post(f"/admin_api/exam/{eid}/copy", headers=headers, json={})
 assert copy.status_code == 200 and copy.get_json()["exam"]["title"].endswith("-副本")
 copy_id = copy.get_json()["exam"]["id"]
+for _material in ("shared.docx", "extra.txt"):
+    with open(os.path.join(app_mod.MATERIAL_DIR, _material), "wb") as _f:
+        _f.write(b"material")
 pid, _ = db.add_practice({"name": "素材去重", "etype": "word", "category": "测试",
                           "level": "基础", "materials": ["shared.docx"],
                           "requirement": "", "save_as": "答案.docx", "checks": []})

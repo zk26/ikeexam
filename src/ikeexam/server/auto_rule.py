@@ -22,6 +22,12 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
+try:
+    from ..graders.base import validate_ooxml
+except ImportError:
+    sys.path.insert(0, os.path.dirname(ROOT))
+    from graders.base import validate_ooxml
+
 from docx.oxml.ns import qn           # noqa: E402
 from openpyxl import load_workbook     # noqa: E402
 from pptx import Presentation          # noqa: E402
@@ -60,6 +66,7 @@ def trim(s, n=15):
 # ==================== WPS 文字 ====================
 def analyze_word(path, default_score, max_items=12):
     from docx import Document
+    validate_ooxml(path)
     doc = Document(path)
     checks = []
 
@@ -156,6 +163,7 @@ def analyze_word(path, default_score, max_items=12):
 
 # ==================== WPS 表格 ====================
 def analyze_excel(path, default_score, max_items=12):
+    validate_ooxml(path)
     wb_f = load_workbook(path, data_only=False)
     checks = []
     ws = wb_f.active
@@ -282,6 +290,7 @@ def analyze_excel(path, default_score, max_items=12):
 
 # ==================== WPS 演示 ====================
 def analyze_ppt(path, default_score, max_items=12):
+    validate_ooxml(path)
     prs = Presentation(path)
     checks = []
 

@@ -9,7 +9,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
 from ikeexam.shared import ui_theme
-from ikeexam.teacher.visual_config import TypingConfigEditor
+from ikeexam.teacher.visual_config import DrawingConfigEditor, TypingConfigEditor
 
 
 def main():
@@ -23,6 +23,15 @@ def main():
                        "text": "春天来了，花儿开了。"}],
             passages_en=[{"grade": "四年级", "kind": "字母", "title": "字母表",
                           "text": "a b c d e f g"}])
+        editor.pack(fill="both", expand=True)
+        assert editor.scroll.cget("style") == "Thin.TScrollbar"
+        drawing = DrawingConfigEditor(root)
+        drawing.pack(fill="x")
+        root.update()
+        assert drawing.cget("style") == "Card.TFrame"
+        assert drawing.brief.grid_info()["sticky"] == "nesw"
+        assert drawing.rowconfigure(3, "weight") == 1
+        drawing.destroy()
         editor.set_config({
             "key_press": {"enabled": False, "keys": ["q", "w"]},
             "typing_zh": {"enabled": True, "seconds": 120, "text": ""},
@@ -34,7 +43,11 @@ def main():
                       if field["key"] == "keys")
         picker.set(["q", "w"])
         assert picker.get() == "q, w"
+        root.deiconify()
+        root.geometry("900x700")
+        root.update()
         picker._open()
+        root.update()
         tops = [widget for widget in picker.winfo_children()
                 if isinstance(widget, tk.Toplevel)]
         assert tops
@@ -48,9 +61,38 @@ def main():
                     pass
                 collect(child)
 
+        def find_text(widget, text):
+            for child in widget.winfo_children():
+                try:
+                    if str(child.cget("text")) == text:
+                        return child
+                except tk.TclError:
+                    pass
+                found = find_text(child, text)
+                if found is not None:
+                    return found
+            return None
+
         collect(tops[-1])
         assert {"Esc", "Tab", "Del", "↑", "↓", "←", "→"} <= set(labels), labels
-        tops[-1].destroy()
+        top = tops[-1]
+        q_check = find_text(top, "Q")
+        top.focus_force()
+        root.update()
+        top.event_generate("<KeyPress>", keysym="q")
+        root.update()
+        assert int(top.getvar(q_check.cget("variable"))) == 0
+        digit_check = find_text(top, "4")
+        top.event_generate("<KeyPress>", keysym="4")
+        root.update()
+        assert int(top.getvar(digit_check.cget("variable"))) == 1
+        esc_check = find_text(top, "Esc")
+        top.event_generate("<KeyPress>", keysym="Escape")
+        root.update()
+        assert top.winfo_exists()
+        assert int(top.getvar(esc_check.cget("variable"))) == 1
+        top.destroy()
+        root.withdraw()
         editor.passage_vars["typing_zh"].set("四年级 · 生词 · 示例课文")
         editor.passage_vars["typing_zh"].set("四年级 · 生词 · 示例课文")
         combo = next(widget for widget in editor.controls

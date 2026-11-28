@@ -3,9 +3,84 @@
 每个检查项返回 (得分: float, 说明: str)
 """
 import logging
+import stat
+import zipfile
+from contextlib import nullcontext
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger("graders")
+
+MAX_ZIP_ENTRIES = 4096
+MAX_ZIP_ENTRY_BYTES = 128 * 1024 * 1024
+MAX_ZIP_TOTAL_BYTES = 512 * 1024 * 1024
+MAX_ZIP_RATIO = 300
+MAX_XML_BYTES = 32 * 1024 * 1024
+MAX_XML_TOTAL_BYTES = 128 * 1024 * 1024
+
+
+def _safe_ooxml_name(info):
+    name = info.filename
+    if not name or "\x00" in name or "\\" in name:
+        return False
+    if name.startswith("/") or (len(name) >= 2 and name[1] == ":" and
+                                name[0].isalpha()):
+        return False
+    if info.is_dir():
+        if not name.endswith("/"):
+            return False
+        name = name[:-1]
+    parts = name.split("/")
+    return all(part not in ("", ".", "..") and
+               all(ord(ch) >= 32 for ch in part) for part in parts)
+
+
+def validate_ooxml(path):
+    """Reject oversized, ambiguous, or unsafe OOXML containers before parsing."""
+    context = (nullcontext(path) if isinstance(path, zipfile.ZipFile)
+               else zipfile.ZipFile(path))
+    with context as archive:
+        infos = archive.infolist()
+        if len(infos) > MAX_ZIP_ENTRIES:
+            raise ValueError(f"OOXML ZIP 条目过多: {len(infos)}")
+        seen = set()
+        total = 0
+        xml_total = 0
+        for info in infos:
+            if not _safe_ooxml_name(info):
+                raise ValueError(f"OOXML ZIP 包含不安全路径: {info.filename!r}")
+            if info.filename in seen:
+                raise ValueError(f"OOXML ZIP 包含重复条目: {info.filename!r}")
+            seen.add(info.filename)
+            if info.flag_bits & 0x1:
+                raise ValueError("OOXML ZIP 不支持加密条目")
+            if stat.S_ISLNK((info.external_attr >> 16) & 0xFFFF):
+                raise ValueError(f"OOXML ZIP 包含符号链接: {info.filename!r}")
+            size = info.file_size
+            if size < 0 or info.compress_size < 0:
+                raise ValueError(f"OOXML ZIP 条目大小无效: {info.filename!r}")
+            if info.is_dir():
+                continue
+            if size > MAX_ZIP_ENTRY_BYTES:
+                raise ValueError(f"OOXML 单条目解压后过大: {info.filename!r}")
+            total += size
+            if total > MAX_ZIP_TOTAL_BYTES:
+                raise ValueError("OOXML 总解压大小超过上限")
+            if size and (not info.compress_size or
+                         size / info.compress_size > MAX_ZIP_RATIO):
+                raise ValueError(f"OOXML 条目压缩比异常: {info.filename!r}")
+            if info.filename.lower().endswith((".xml", ".rels", ".vml")):
+                if size > MAX_XML_BYTES:
+                    raise ValueError(f"OOXML XML 条目过大: {info.filename!r}")
+                with archive.open(info) as stream:
+                    data = stream.read(MAX_XML_BYTES + 1)
+                if len(data) > MAX_XML_BYTES:
+                    raise ValueError(f"OOXML XML 条目过大: {info.filename!r}")
+                xml_total += len(data)
+                if xml_total > MAX_XML_TOTAL_BYTES:
+                    raise ValueError("OOXML XML 总大小超过上限")
+                probe = data.replace(b"\x00", b"").upper()
+                if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe:
+                    raise ValueError(f"OOXML XML 不允许 DTD/实体声明: {info.filename!r}")
 
 
 class BaseGrader(ABC):

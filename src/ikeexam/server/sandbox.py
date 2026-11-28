@@ -6,10 +6,10 @@ server/sandbox.py —— OJ 判题沙箱（跨平台）
 只用 Python 标准库，不装 pip 包、不用 Docker、不引入外部服务。
 
 两条平台路径，能力不同：
-  · POSIX（Linux / macOS）：完整沙箱 —— ulimit 限资源 + 可选 setpriv 降权
-                             + start_new_session + killpg 杀进程树
-  · Windows：降级沙箱 —— 只能限墙钟时间、截断输出、隐藏黑窗口，
-              无法限制内存/CPU（Windows 没有 ulimit）
+  · POSIX（Linux / macOS）：ulimit 限资源 + 可选 setpriv 降权
+                            + start_new_session + killpg 杀进程树
+  · Windows：Job Object 限内存/进程数 + 墙钟/输出限制；进程以
+             CREATE_SUSPENDED 启动，赋值 Job 后才恢复执行
 
 ---- 为什么 Windows 做不了资源限制 ----
 Windows 没有 ulimit；限制内存要 Job Object（ctypes 调 Win32 API），
@@ -57,7 +57,7 @@ SANDBOX_UID = os.environ.get("SANDBOX_UID")
 SANDBOX_GID = os.environ.get("SANDBOX_GID")
 
 # 状态常量
-OK, TLE, MLE, RE, SE = "ok", "tle", "mle", "re", "se"
+OK, TLE, MLE, RE, SE, CANCELLED = "ok", "tle", "mle", "re", "se", "cancelled"
 
 # MLE 关键词：ulimit -v 触发时 Python 抛 MemoryError，C++ 抛 bad_alloc，
 # 内核 OOM killer 杀进程时 shell 会打印 "Killed"。没有精确内存峰值统计，
@@ -96,7 +96,8 @@ def _looks_mle(err):
     return any(h in low for h in _MLE_HINTS)
 
 
-def _build_cmd(argv, cpu, mem_kb, fsize_kb, stack_kb, nofile):
+def _build_cmd(argv, cpu, mem_kb, fsize_kb, stack_kb, nofile, nproc=64,
+               drop_privileges=True, shell=None):
     """
     用 bash 先设 ulimit 再 exec 替换自身。
 
@@ -112,16 +113,22 @@ def _build_cmd(argv, cpu, mem_kb, fsize_kb, stack_kb, nofile):
     parts.append(f"-f {int(fsize_kb)}")     # 单个文件写入上限（KB）
     parts.append(f"-s {int(stack_kb)}")     # 栈上限（KB）
     parts.append(f"-n {int(nofile)}")       # 打开文件数
+    parts.append(f"-u {int(nproc)}")        # 进程/线程数上限
     parts.append("-c 0")                    # 不产生 core dump
     ulimits = "ulimit " + " ".join(parts)
     inner = " ".join(shlex.quote(str(a)) for a in argv)
-    cmd = ["bash", "-c", f"{ulimits}; exec {inner}"]
+    shell = shell or shutil.which("bash")
+    if not shell or not os.path.isabs(shell):
+        raise OSError("找不到绝对路径的 bash")
+    cmd = [os.path.realpath(shell), "-c", f"{ulimits}; exec {inner}"]
     # 只有 root 才需要降权（普通用户本身已是低权限），且得有 setpriv。
     # 学生代码能读到 ojrunner 有权读的一切，所以服务能不用 root 就别用 root。
-    if SANDBOX_UID is not None and os.geteuid() == 0 and shutil.which("setpriv"):
-        cmd = ["setpriv", "--reuid", str(SANDBOX_UID),
-               "--regid", str(SANDBOX_GID or SANDBOX_UID),
-               "--clear-groups"] + cmd
+    if drop_privileges and SANDBOX_UID is not None and os.geteuid() == 0:
+        setpriv = shutil.which("setpriv")
+        if setpriv and os.path.isabs(setpriv):
+            cmd = [os.path.realpath(setpriv), "--reuid", str(SANDBOX_UID),
+                   "--regid", str(SANDBOX_GID or SANDBOX_UID),
+                   "--clear-groups"] + cmd
     return cmd
 
 
@@ -137,6 +144,27 @@ def _write_files(workdir, files):
             f.write(str(content))
 
 
+def _bind_workdir_argv(argv, workdir):
+    if not argv:
+        raise ValueError("运行命令为空")
+    executable = os.fspath(argv[0])
+    if os.path.isabs(executable):
+        return list(argv)
+    candidate = os.path.realpath(os.path.join(workdir, executable))
+    root = os.path.realpath(workdir)
+    try:
+        inside = os.path.commonpath([candidate, root]) == root
+    except ValueError:
+        inside = False
+    if not inside or not os.path.isfile(candidate):
+        raise FileNotFoundError(f"运行文件不在沙箱工作目录: {executable}")
+    return [candidate, *argv[1:]]
+
+
+def _cancelled(cancel_event):
+    return cancel_event is not None and cancel_event.is_set()
+
+
 def _result(status, out, err, rc, sig, elapsed):
     return {"status": status, "stdout": out, "stderr": err,
             "exit_code": rc, "signal": sig, "time": elapsed}
@@ -144,7 +172,8 @@ def _result(status, out, err, rc, sig, elapsed):
 
 def run(argv, stdin_data="", *, files=None, compile_argv=None,
         wall=10, compile_wall=20, cpu=None, mem_kb=None, fsize_kb=16384,
-        stack_kb=8192, nofile=64, env=None, max_out=None, work_root=None):
+        stack_kb=8192, nofile=64, nproc=64, env=None, max_out=None,
+        work_root=None, cancel_event=None):
     """
     在隔离临时目录里执行一段程序，返回运行结果。
 
@@ -157,20 +186,28 @@ def run(argv, stdin_data="", *, files=None, compile_argv=None,
     cpu         POSIX 下 ulimit -t 的 CPU 时间（秒），None=不限
     mem_kb      POSIX 下 ulimit -v 地址空间（KB），None=不限
     fsize_kb / stack_kb / nofile  POSIX 下 ulimit 的其余限制
+    nproc         POSIX 下 ulimit -u 的进程/线程数上限
     max_out     输出截断上限（字符），None=不截断
     work_root   沙箱目录的父目录
+    cancel_event 可选取消事件；置位时终止当前进程并返回 cancelled
 
     返回 {status, stdout, stderr, exit_code, signal, time}
-      status ∈ ok / tle / mle / re / se
+      status ∈ ok / tle / mle / re / se / cancelled
     """
     work_root = work_root or SANDBOX_WORK_ROOT
+    if _cancelled(cancel_event):
+        return _result(CANCELLED, "", "已取消", None, None, 0.0)
+    if compile_argv and (not compile_argv or
+                         not os.path.isabs(os.fspath(compile_argv[0]))):
+        return _result(SE, "", "编译器必须使用绝对路径", -1, None, 0.0)
     os.makedirs(work_root, exist_ok=True)
     if IS_WIN:
         return _run_windows(argv, stdin_data, files, compile_argv, wall,
-                            compile_wall, env, work_root, max_out, mem_kb)
+                            compile_wall, env, work_root, max_out, mem_kb,
+                            cancel_event)
     return _run_posix(argv, stdin_data, files, compile_argv, wall,
                       compile_wall, cpu, mem_kb, fsize_kb, stack_kb,
-                      nofile, env, work_root, max_out)
+                      nofile, nproc, env, work_root, max_out, cancel_event)
 
 
 # ==================== POSIX ====================
@@ -185,9 +222,11 @@ def _kill_tree_posix(p):
 
 
 def _run_posix(argv, stdin_data, files, compile_argv, wall, compile_wall,
-               cpu, mem_kb, fsize_kb, stack_kb, nofile, env, work_root, max_out):
-    if not shutil.which("bash"):
-        return _result(SE, "", "服务器没有 bash，无法启用沙箱", -1, None, 0.0)
+               cpu, mem_kb, fsize_kb, stack_kb, nofile, nproc, env, work_root,
+               max_out, cancel_event=None):
+    bash = shutil.which("bash")
+    if not bash or not os.path.isabs(bash):
+        return _result(SE, "", "服务器没有绝对路径的 bash，无法启用沙箱", -1, None, 0.0)
     workdir = tempfile.mkdtemp(prefix="oj_", dir=work_root)
     try:
         _write_files(workdir, files)
@@ -200,19 +239,28 @@ def _run_posix(argv, stdin_data, files, compile_argv, wall, compile_wall,
         if env:
             base_env.update(env)
 
-        # 编译阶段（可选，C++ 用）。编译不限资源（g++ 本身吃内存），只限墙钟。
+        # 编译阶段（可选，C++ 用）。编译器不吃学生内存上限，但仍受文件/进程/CPU 限制。
         if compile_argv:
+            if _cancelled(cancel_event):
+                return _result(CANCELLED, "", "已取消", None, None, 0.0)
             with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
                 try:
+                    compile_cmd = _build_cmd(
+                        compile_argv, cpu=int(compile_wall) + 1, mem_kb=None,
+                        fsize_kb=fsize_kb, stack_kb=stack_kb, nofile=nofile,
+                        nproc=max(16, nproc), drop_privileges=False, shell=bash)
                     cp = subprocess.Popen(
-                        compile_argv, cwd=workdir, stdin=subprocess.DEVNULL,
+                        compile_cmd, cwd=workdir, stdin=subprocess.DEVNULL,
                         stdout=out_file, stderr=err_file, env=base_env,
                         start_new_session=True)
                 except Exception as e:
                     return _result(SE, "", f"编译启动失败: {e}", -1, None, 0.0)
                 out_b, err_b, timed_out, overflow = _wait_process(
                     cp, b"", out_file, err_file, compile_wall, max_out,
-                    _kill_tree_posix)
+                    _kill_tree_posix, cancel_event)
+            if _cancelled(cancel_event):
+                return _result(CANCELLED, _decode(out_b, workdir), "已取消",
+                               cp.returncode, None, 0.0)
             if timed_out:
                 return _result(RE, "", "编译超时", None, None, compile_wall)
             if overflow:
@@ -230,19 +278,31 @@ def _run_posix(argv, stdin_data, files, compile_argv, wall, compile_wall,
                     pass
 
         stdin_b = _to_bytes(stdin_data)
+        if _cancelled(cancel_event):
+            return _result(CANCELLED, "", "已取消", None, None, 0.0)
+        try:
+            run_argv = _bind_workdir_argv(argv, workdir)
+            run_cmd = _build_cmd(run_argv, cpu, mem_kb, fsize_kb, stack_kb,
+                                 nofile, nproc=nproc, shell=bash)
+        except Exception as e:
+            return _result(SE, "", f"启动失败: {e}", -1, None, 0.0)
         start = time.monotonic()
         with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
             try:
                 p = subprocess.Popen(
-                    _build_cmd(argv, cpu, mem_kb, fsize_kb, stack_kb, nofile),
-                    cwd=workdir, stdin=subprocess.PIPE,
+                    run_cmd, cwd=workdir, stdin=subprocess.PIPE,
                     stdout=out_file, stderr=err_file, env=base_env,
                     start_new_session=True)
             except Exception as e:
                 return _result(SE, "", f"启动失败: {e}", -1, None, 0.0)
             out_b, err_b, timed_out, overflow = _wait_process(
-                p, stdin_b, out_file, err_file, wall, max_out, _kill_tree_posix)
+                p, stdin_b, out_file, err_file, wall, max_out, _kill_tree_posix,
+                cancel_event)
         elapsed = time.monotonic() - start
+
+        if _cancelled(cancel_event):
+            return _result(CANCELLED, _decode(out_b, workdir), "已取消",
+                           p.returncode, None, elapsed)
 
         rc = p.returncode
         out = _decode(out_b, workdir)
@@ -275,7 +335,8 @@ def _classify(rc, timed_out, out, err, elapsed):
     return _result(RE, out, err, rc, None, elapsed)
 
 
-def _wait_process(p, stdin_b, out_file, err_file, timeout, max_out, kill_tree):
+def _wait_process(p, stdin_b, out_file, err_file, timeout, max_out, kill_tree,
+                  cancel_event=None):
     """输出重定向到磁盘并限大小，返回 (out, err, timed_out, overflow)。"""
     limit = max(65536, (int(max_out) * 4 + 1)) if max_out else 0
 
@@ -293,6 +354,9 @@ def _wait_process(p, stdin_b, out_file, err_file, timeout, max_out, kill_tree):
     timed_out = False
     overflow = False
     while p.poll() is None:
+        if _cancelled(cancel_event):
+            kill_tree(p)
+            break
         if limit:
             try:
                 size = os.fstat(out_file.fileno()).st_size + os.fstat(err_file.fileno()).st_size
@@ -323,15 +387,22 @@ def _wait_process(p, stdin_b, out_file, err_file, timeout, max_out, kill_tree):
         except OSError:
             pass
 
+    remaining = limit
+
     def read_limited(stream):
+        nonlocal remaining
         try:
             stream.seek(0)
-            data = stream.read(limit or -1)
+            data = stream.read(remaining if limit else -1)
+            if limit:
+                remaining -= len(data)
         except Exception:
             data = b""
         return data
 
-    return read_limited(out_file), read_limited(err_file), timed_out, overflow
+    out_b = read_limited(out_file)
+    err_b = read_limited(err_file)
+    return out_b, err_b, timed_out, overflow
 
 
 class _WindowsJob:
@@ -370,6 +441,7 @@ class _WindowsJob:
 
         self._ctypes = ctypes
         self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._ntdll = ctypes.WinDLL("ntdll")
         self._kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
         self._kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         self._kernel32.SetInformationJobObject.argtypes = [
@@ -377,6 +449,8 @@ class _WindowsJob:
         self._kernel32.SetInformationJobObject.restype = wintypes.BOOL
         self._kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
         self._kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        self._ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+        self._ntdll.NtResumeProcess.restype = ctypes.c_long
         self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         self._kernel32.CloseHandle.restype = wintypes.BOOL
         handle = self._kernel32.CreateJobObjectW(None, None)
@@ -399,6 +473,14 @@ class _WindowsJob:
     def assign(self, process):
         if not self._kernel32.AssignProcessToJobObject(self.handle, process._handle):
             raise OSError(self._ctypes.get_last_error(), "AssignProcessToJobObject")
+
+    def resume(self, process):
+        # Popen closes the initial thread handle, so resume the suspended process by
+        # its process handle only after Job assignment; pre-start containment still
+        # depends on an outer Job/container.
+        status = self._ntdll.NtResumeProcess(process._handle)
+        if status != 0:
+            raise OSError(status, "NtResumeProcess")
 
     def close(self):
         handle = getattr(self, "handle", None)
@@ -423,7 +505,7 @@ def _kill_tree_windows(p):
 
 
 def _run_windows(argv, stdin_data, files, compile_argv, wall, compile_wall,
-                 env, work_root, max_out, mem_kb=None):
+                 env, work_root, max_out, mem_kb=None, cancel_event=None):
     workdir = tempfile.mkdtemp(prefix="oj_", dir=work_root)
     job = None
     try:
@@ -438,25 +520,35 @@ def _run_windows(argv, stdin_data, files, compile_argv, wall, compile_wall,
             base_env.update(env)
         no_window = {}
         if hasattr(subprocess, "CREATE_NO_WINDOW"):
-            no_window["creationflags"] = subprocess.CREATE_NO_WINDOW
+            no_window["creationflags"] = (subprocess.CREATE_NO_WINDOW |
+                                          getattr(subprocess, "CREATE_SUSPENDED", 0x4))
         try:
             compile_job = _WindowsJob(max(int(mem_kb or 524288), 524288), 16)
         except Exception as e:
             return _result(SE, "", f"无法启用 Windows 编译资源限制: {e}", -1, None, 0.0)
         try:
             if compile_argv:
+                if _cancelled(cancel_event):
+                    return _result(CANCELLED, "", "已取消", None, None, 0.0)
                 with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
+                    cp = None
                     try:
                         cp = subprocess.Popen(compile_argv, cwd=workdir,
                                               stdin=subprocess.DEVNULL,
                                               stdout=out_file, stderr=err_file,
                                               env=base_env, **no_window)
                         compile_job.assign(cp)
+                        compile_job.resume(cp)
                     except Exception as e:
+                        if cp is not None:
+                            _kill_tree_windows(cp)
                         return _result(SE, "", f"编译启动失败: {e}", -1, None, 0.0)
                     out_b, err_b, timed_out, overflow = _wait_process(
                         cp, b"", out_file, err_file, compile_wall, max_out,
-                        _kill_tree_windows)
+                        _kill_tree_windows, cancel_event)
+                if _cancelled(cancel_event):
+                    return _result(CANCELLED, _decode(out_b, workdir), "已取消",
+                                   cp.returncode, None, 0.0)
                 if timed_out:
                     return _result(RE, "", "编译超时", None, None, compile_wall)
                 if overflow:
@@ -470,23 +562,38 @@ def _run_windows(argv, stdin_data, files, compile_argv, wall, compile_wall,
             compile_job.close()
 
         stdin_b = _to_bytes(stdin_data)
+        if _cancelled(cancel_event):
+            return _result(CANCELLED, "", "已取消", None, None, 0.0)
+        try:
+            run_argv = _bind_workdir_argv(argv, workdir)
+        except Exception as e:
+            return _result(SE, "", f"启动失败: {e}", -1, None, 0.0)
         start = time.monotonic()
         try:
             job = _WindowsJob(mem_kb, 1)
         except Exception as e:
             return _result(SE, "", f"无法启用 Windows 运行资源限制: {e}", -1, None, 0.0)
         with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
+            p = None
             try:
-                p = subprocess.Popen(argv, cwd=workdir,
+                p = subprocess.Popen(run_argv, cwd=workdir,
                                      stdin=subprocess.PIPE,
                                      stdout=out_file, stderr=err_file,
                                      env=base_env, **no_window)
                 job.assign(p)
+                job.resume(p)
             except Exception as e:
+                if p is not None:
+                    _kill_tree_windows(p)
                 return _result(SE, "", f"启动失败: {e}", -1, None, 0.0)
             out_b, err_b, timed_out, overflow = _wait_process(
-                p, stdin_b, out_file, err_file, wall, max_out, _kill_tree_windows)
+                p, stdin_b, out_file, err_file, wall, max_out, _kill_tree_windows,
+                cancel_event)
         elapsed = time.monotonic() - start
+
+        if _cancelled(cancel_event):
+            return _result(CANCELLED, _decode(out_b, workdir), "已取消",
+                           p.returncode, None, elapsed)
 
         rc = p.returncode
         out = _decode(out_b, workdir)

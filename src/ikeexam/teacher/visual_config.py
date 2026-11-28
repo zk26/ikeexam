@@ -9,10 +9,14 @@ from ikeexam.shared.config_schema import RULE_TYPES, RULE_TYPE_MAP, TYPING_TASKS
 class ScrollableFrame(ttk.Frame):
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
+        from ikeexam.shared import ui_theme
+        tokens = getattr(self.winfo_toplevel(), "_ui_tokens", ui_theme.LIGHT)
+        background = kwargs.get("background", tokens["bg"])
         self.canvas = tk.Canvas(self, highlightthickness=0, bd=0,
-                                background=kwargs.get("background", "#FFFFFF"))
-        self.scroll = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.inner = ttk.Frame(self.canvas)
+                                background=background)
+        self.scroll = ttk.Scrollbar(self, orient="vertical", style="Thin.TScrollbar",
+                                    command=self.canvas.yview)
+        self.inner = ttk.Frame(self.canvas, style="Surface.TFrame", padding=12)
         self.canvas.configure(yscrollcommand=self.scroll.set)
         self.scroll.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -38,6 +42,26 @@ class RuleEditor(ScrollableFrame):
         self.on_change = on_change
         self.rows = []
         self.controls = []
+        self.canvas.pack_forget()
+        self.scroll.pack_forget()
+        bar = ttk.Frame(self)
+        bar.pack(side="top", fill="x", pady=(0, 6))
+        self.add_button = ttk.Button(bar, text="＋ 添加评分点", command=self._add_rule)
+        self.add_button.pack(side="left")
+        self.controls.append(self.add_button)
+        self.empty_label = ttk.Label(
+            self.inner, text="还没有评分点。点击「＋ 添加评分点」设置判分依据。",
+            style="Muted.TLabel", wraplength=520, justify="center")
+        self.empty_label.grid(row=0, column=0, sticky="nsew", pady=32)
+        self.scroll.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+    def _add_rule(self):
+        rule = {"id": f"评分点{len(self.rows) + 1}",
+                "type": RULE_TYPES[0]["value"], "score": 0}
+        self._insert_row(len(self.rows), rule)
+        self._renumber()
+        self._changed()
 
     def _changed(self):
         if self.on_change:
@@ -137,6 +161,8 @@ class RuleEditor(ScrollableFrame):
 
         body = ttk.Frame(outer)
         body.grid(row=2, column=0, sticky="ew")
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
         fields = list(spec.get("locators") or []) + list(spec.get("fields") or [])
         widgets = []
         for field_index, field in enumerate(fields):
@@ -166,6 +192,10 @@ class RuleEditor(ScrollableFrame):
         type_var.trace_add("write", choose_type)
 
     def _renumber(self):
+        if self.rows:
+            self.empty_label.grid_remove()
+        else:
+            self.empty_label.grid(row=0, column=0, sticky="nsew", pady=32)
         for index, row in enumerate(self.rows):
             row["outer"].configure(text=f"评分点 {index + 1}")
             row["id"].set(row["id"].get() or f"评分点{index + 1}")
@@ -305,7 +335,7 @@ class KeyPicker(ttk.Frame):
             rows.insert(-1, ["esc", "tab", "delete", "up", "down", "left", "right"])
         body = ttk.Frame(top, padding=14)
         body.pack(fill="both", expand=True)
-        ttk.Label(body, text="点击按键进行选择，留空表示全部。",
+        ttk.Label(body, text="点击或直接按键盘按键进行选择，留空表示全部。",
                   style="Muted.TLabel").grid(row=0, column=0, columnspan=10,
                                              sticky="w", pady=(0, 10))
         for row_index, keys in enumerate(rows, 1):
@@ -338,7 +368,28 @@ class KeyPicker(ttk.Frame):
         ttk.Button(actions, text="清空", command=lambda: choose_all(False)).pack(
             side="left", padx=4)
         ttk.Button(actions, text="完成", command=finish).pack(side="right")
-        top.bind("<Escape>", lambda event: top.destroy())
+
+        aliases = {"return": "enter", "kp_enter": "enter", "escape": "esc",
+                   "shift_l": "shift", "shift_r": "shift",
+                   "caps_lock": "capslock"}
+
+        def on_key(event):
+            keysym = (event.keysym or "").lower()
+            key = aliases.get(keysym, keysym)
+            if key not in variables:
+                if keysym == "escape" and "esc" not in variables:
+                    top.destroy()
+                return None
+            variables[key].set(not variables[key].get())
+            return "break"
+
+        def bind_keys(widget):
+            widget.bind("<KeyPress>", on_key, add="+")
+            for child in widget.winfo_children():
+                bind_keys(child)
+
+        bind_keys(top)
+        top.focus_force()
         top.update_idletasks()
         x = self.winfo_rootx() + max(0, (self.winfo_width() - top.winfo_width()) // 2)
         y = self.winfo_rooty() + max(0, (self.winfo_height() - top.winfo_height()) // 2)
@@ -370,7 +421,8 @@ class TypingConfigEditor(ScrollableFrame):
         self.inner.columnconfigure(0, weight=1)
         for index, task in enumerate(TYPING_TASKS):
             key = task["key"]
-            box = ttk.LabelFrame(self.inner, text=task["label"], padding=8)
+            box = ttk.LabelFrame(self.inner, text=task["label"], style="Card.TLabelframe",
+                             padding=12)
             box.grid(row=index, column=0, sticky="ew", pady=(0, 8))
             enabled = tk.BooleanVar(value=True)
             enabled_check = ttk.Checkbutton(box, text="本场考试启用",
@@ -516,7 +568,7 @@ class TypingConfigEditor(ScrollableFrame):
 
 class DrawingConfigEditor(ttk.Frame):
     def __init__(self, master, on_change=None, **kwargs):
-        super().__init__(master, **kwargs)
+        super().__init__(master, style="Card.TFrame", padding=12, **kwargs)
         self.on_change = on_change
         self.controls = []
         self.draw_var = tk.BooleanVar(value=True)
@@ -533,8 +585,10 @@ class DrawingConfigEditor(ttk.Frame):
         grid_spin.grid(row=1, column=1, sticky="w", pady=4)
         ttk.Label(self, text="画题要求").grid(row=2, column=0, columnspan=2,
                                                sticky="w", pady=(8, 2))
-        self.brief = tk.Text(self, height=8, wrap="word", font=("Microsoft YaHei", 9))
-        self.brief.grid(row=3, column=0, columnspan=2, sticky="nsew")
+        self.brief = tk.Text(self, width=36, height=5, wrap="word", font=("Microsoft YaHei", 10),
+                             bg="#FFFFFF", fg="#27324A", relief="solid", borderwidth=1,
+                             highlightthickness=1, highlightbackground="#B8B3E9")
+        self.brief.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(4, 0))
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
         self.rowconfigure(3, weight=1)

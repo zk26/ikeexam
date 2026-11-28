@@ -89,13 +89,13 @@
   <button type="button" class="tab-btn{% if k == active %} active{% endif %}{% if k in sel_types %} on{% endif %}" data-tab="{{ k }}"
           role="tab" id="tab-btn-{{ k }}" aria-controls="tab-{{ k }}"
           aria-selected="{{ 'true' if k == active else 'false' }}"
-          onclick="showTab('{{ k }}')">{{ l }}<span class="tab-count">{{ question_counts[k] if k in ['single','multi','judge','blank','drag','code'] else tasks|length if k == 'practice' else typing_enabled_n if k == 'typing' else drawing_cfg.styles|length if k == 'drawing' else qs|length + tasks|length }}</span>{% if k in sel_types %}<span class="dot" title="这场考试考这个题型"></span>{% endif %}<span class="dirty-note">待保存</span></button>
+          onclick="showTab('{{ k }}')">{{ l }}<span class="tab-count">{{ question_counts[k] if k in ['single','multi','judge','blank','drag','code'] else tasks|length if k == 'practice' else typing_enabled_n if k == 'typing' else drawing_cfg.styles|length if k == 'drawing' else qs|length + tasks|length }}</span>{% if k in sel_types %}<span class="dot" title="这场考试考这个题型"></span>{% endif %}</button>
   {% endfor %}
 </div>
 <p class="muted" style="margin:-10px 0 16px">
   全部题型页签常驻，当前页会高亮；<b>基本设置</b>只管考试名称/总时长/交卷语。
   每个题型页开头有「本场考试考…」开关，<b>带绿点的</b>才是这场要发给学生的题型。
-  选题修改后须先点底部「保存选题」，未保存时不能跨题型切换。
+  选题修改后会自动保存，可随时切换其他题型。
 </p>
 
 <style>
@@ -117,11 +117,6 @@
               border:1.5px solid var(--navy);border-radius:999px;background:var(--cream);
               color:var(--navy);font-size:11px;line-height:18px;text-align:center}
 .tab-btn.on .dot{display:inline-block;animation:fadeUp .2s ease both}
-.tab-btn .dirty-note{display:none;margin-left:6px;font-size:11px;font-weight:600}
-.tab-btn.dirty{background:var(--coral);color:var(--navy)}
-.tab-btn.active.dirty{background:var(--yellow);color:var(--navy)}
-.tab-btn.dirty .dirty-note{display:inline;color:var(--navy)}
-.tab-btn.active.dirty .dirty-note{color:var(--navy)}
 .tab-panel{display:none}
 .tab-panel.active{display:block;animation:fadeUp .18s ease both}
 /* 题型开关（每个题型页开头）：整条可点，开启时描品牌色边 */
@@ -218,10 +213,6 @@ tr.pending-remove td{text-decoration:line-through;background:var(--red-l)}
       <input type="checkbox" name="require_complete" value="1" {% if exam.require_complete %}checked{% endif %}>
       未做完禁止提交
     </label>
-    <label style="cursor:pointer">
-      <input type="checkbox" name="passwordless" value="1" {% if exam.passwordless %}checked{% endif %}>
-      免密码考试（学生不填姓名/座位，按 IP 识别）
-    </label>
   </div>
   <div class="row" style="align-items:flex-start">
     <label style="margin-top:8px">交卷结束语</label>
@@ -264,7 +255,7 @@ tr.pending-remove td{text-decoration:line-through;background:var(--red-l)}
     一行一个学生，写法随意：<span class="mono">小明,01</span>、
     <span class="mono">小红 02</span>、<span class="mono">小王|03</span>、只写
     <span class="mono">小刚</span> 也行。<b>不配名单 = 不限制</b>（老考试照常）。
-    免密码考试支持 <span class="mono">姓名,座位,IP</span>，也可只填 IP。
+    名单支持 <span class="mono">姓名,座位,IP</span>；开考时可按 IP 自动识别学生。
   </p>
   <textarea id="rosterText" rows="6" style="width:100%;box-sizing:border-box;
             font-family:inherit" placeholder="一行一个学生，例如：&#10;小明,01&#10;小红 02&#10;小王|03">{{ roster_text }}</textarea>
@@ -834,7 +825,7 @@ function delRoster(rid){
   </div><!-- /全部题库 -->
   <div class="picker-panel selected-panel">
     <h3>已选{{ type_label }} <span class="tag info selected-total-{{ type_key }}">{{ type_qs|length }} 题</span></h3>
-    <p class="muted" style="margin:0 0 8px">按下面的顺序组卷；用上移 / 下移或「重排已选」排序，移除后点底部「保存选题」生效。</p>
+    <p class="muted" style="margin:0 0 8px">按下面的顺序组卷；用上移 / 下移或「重排已选」排序，所有改动都会自动保存。</p>
     <input type="hidden" name="qids_order_{{ type_key }}" id="qids-order-{{ type_key }}"
            value="{{ type_qs | map(attribute='id') | join(',') }}">
     <div class="selected-question-list" id="selected-list-{{ type_key }}">
@@ -886,7 +877,7 @@ function delRoster(rid){
                       {qtype:'{{ type_key }}', selection_present:1, category: catOf(this)})">
       加入当前分类全部（立即保存）
     </button>
-    <span class="muted">修改勾选后请点页面底部「保存选题」；随机抽题和批量加入会立即保存。</span>
+    <span class="muted">勾选、移除和排序会自动保存；随机抽题和批量加入会立即写入。</span>
   </div>
   </div><!-- /type-body -->
 </div><!-- /card -->
@@ -1059,15 +1050,7 @@ function delRoster(rid){
 {% set selection_active = active in selection_tabs | map(attribute=0) | list %}
 <div class="bottom-action-bar">
   <div class="bar bottom-actions" id="selectionActions"{% if not selection_active %} hidden{% endif %}>
-    {% if config_locked %}
-    <button type="button" class="btn gray lg" disabled
-            title="考试进行中或已结束不能修改配置">保存选题（已锁定）</button>
-    {% else %}
-    <button type="button" class="btn green lg" id="saveQuestionsBtn"
-            onclick="saveCurrentQuestions()">保存选题</button>
-    {% endif %}
-    <button type="button" class="btn gray lg" onclick="showTab('basic')">返回基本设置</button>
-    <span class="muted" id="selectionState">当前题型的勾选改动保存后才会生效</span>
+    <span class="muted" id="selectionState">{% if config_locked %}配置已锁定，仅可查看{% else %}选题会自动保存，无需手动提交{% endif %}</span>
   </div>
   <div class="bar bottom-actions" id="overviewActions" hidden>
     <a class="btn gray lg" href="/">返回控制台</a>
@@ -1165,7 +1148,7 @@ function delRoster(rid){
    提交助手
    ⚠️ 以前这里用了 <form> 嵌套 <form>，那是无效 HTML：
    浏览器会把外层表单提前闭合，导致
-     · 勾选的题目不在表单里 → 「保存选题」没反应
+     · 勾选的题目不在表单里 → 选题保存没反应
      · 「随机抽题」提交到别的表单 → 页面乱跳
    现在统一用这几个函数：字段还在主表单里，只改 action 再 submit。
    ============================================================ */
@@ -1235,7 +1218,6 @@ function deleteMaterialNames(names, button){
 var TABS = [{% for k, l in type_tabs.items %}'{{ k }}'{{ "," if not loop.last }}{% endfor %}];
 var THEORY_TABS = [{% for k, l in qtype_tabs %}'{{ k }}'{{ "," if not loop.last }}{% endfor %}];
 var SELECTION_TABS = THEORY_TABS.concat(['practice']);
-var DIRTY = {};
 var DRAG_EDIT_QID = 0;
 var DRAG_QUESTIONS = {
 {% for q in allq if q.qtype == 'drag' %}
@@ -1338,6 +1320,15 @@ document.getElementById('dragSaveTarget').addEventListener('load', function(){
   dragSaveFinished(this);
 });
 
+var QUESTION_SAVE_TIMERS = {};
+var QUESTION_SAVE_CHAINS = {};
+function setSelectionState(message, bad){
+  var tip = document.getElementById('selectionState');
+  if(tip){
+    tip.textContent = message;
+    tip.style.color = bad ? 'var(--danger)' : '';
+  }
+}
 function updateBottomActions(name){
   var selection = document.getElementById('selectionActions');
   var settings = document.getElementById('settingsActions');
@@ -1346,21 +1337,12 @@ function updateBottomActions(name){
   if(selection) selection.hidden = !choosing;
   if(settings) settings.hidden = choosing || name === 'overview';
   if(overview) overview.hidden = name !== 'overview';
-  var tip = document.getElementById('selectionState');
-  if(tip){
-    tip.textContent = DIRTY[name] ? '有未保存的选题改动，请先点「保存选题」' :
-      '当前题型的勾选改动保存后才会生效';
-  }
+  if(choosing) setSelectionState(CONFIG_LOCKED ? '配置已锁定，仅可查看' : '选题会自动保存，无需手动提交', false);
 }
 
 function showTab(name){
   if(TABS.indexOf(name) < 0) name = 'basic';    // 兜底：不认识就回基本设置
   var ct = document.getElementById('currentTab');
-  var current = ct ? ct.value : 'basic';
-  if(name !== current && DIRTY[current]){
-    alert('「' + (TAB_LABEL[current] || current) + '」还有未保存的选题改动，请先点击底部「保存选题」。');
-    return;
-  }
   document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active')});
   document.querySelectorAll('.tab-btn').forEach(function(b){
     b.classList.remove('active'); b.setAttribute('aria-selected', 'false');
@@ -1376,11 +1358,42 @@ function showTab(name){
   try{ history.replaceState(null,'','?tab='+name); }catch(e){}
 }
 
-function markTypeDirty(type){
-  DIRTY[type] = true;
-  var btn = document.querySelector('.tab-btn[data-tab="' + type + '"]');
-  if(btn) btn.classList.add('dirty');
-  updateBottomActions(document.getElementById('currentTab').value);
+function queueQuestionSave(type){
+  if(CONFIG_LOCKED) return;
+  clearTimeout(QUESTION_SAVE_TIMERS[type]);
+  setSelectionState('正在自动保存…', false);
+  QUESTION_SAVE_TIMERS[type] = setTimeout(function(){ saveQuestionType(type); }, 250);
+}
+
+function saveQuestionType(type){
+  clearTimeout(QUESTION_SAVE_TIMERS[type]);
+  syncQuestionOrder(type);
+  var data = new URLSearchParams();
+  data.append('_csrf', CSRF_R);
+  data.append('tab', type);
+  document.querySelectorAll('.qTable-' + type + ' input[name="qids"]:checked').forEach(function(cb){
+    data.append('qids', cb.value);
+  });
+  data.append('qids_order_' + type, document.getElementById('qids-order-' + type).value);
+  var previous = QUESTION_SAVE_CHAINS[type] || Promise.resolve();
+  var task = previous.catch(function(){}).then(function(){
+    return fetch('/exam/{{ exam.id }}/questions/' + type, {
+      method: 'POST',
+      headers: {'X-CSRF-Token': CSRF_R},
+      body: data
+    });
+  });
+  QUESTION_SAVE_CHAINS[type] = task;
+  task.then(function(response){
+    if(!response.ok || (response.redirected && /\/login/.test(response.url))){
+      throw new Error('保存失败');
+    }
+    setSelectionState('选题已自动保存', false);
+    quickTip('✓ 选题已自动保存');
+  }).catch(function(){
+    setSelectionState('自动保存失败，请修改后重试或刷新页面', true);
+    quickTip('选题自动保存失败，请检查服务器', true);
+  });
 }
 
 function syncSelectedQuestion(type, qid, checked){
@@ -1420,12 +1433,12 @@ function onQuestionChange(type, checkbox){
   if(row) row.classList.toggle('selected', checkbox.checked);
   syncSelectedQuestion(type, checkbox.value, checkbox.checked);
   countType(type);
-  markTypeDirty(type);
+  queueQuestionSave(type);
 }
 
 function removeTypeQuestion(type, qid, button){
   if(CONFIG_LOCKED) return;
-  if(!confirm('把这题从本场考试移除？（题库里还在，点底部「保存选题」后生效）')) return;
+  if(!confirm('把这题从本场考试移除？（题库里还在，移除后会自动保存）')) return;
   var checkbox = document.querySelector('.qTable-' + type + ' input[value="' + qid + '"]');
   if(checkbox){
     checkbox.checked = false;
@@ -1433,7 +1446,7 @@ function removeTypeQuestion(type, qid, button){
   } else {
     syncSelectedQuestion(type, qid, false);
     countType(type);
-    markTypeDirty(type);
+    queueQuestionSave(type);
   }
 }
 
@@ -1452,7 +1465,7 @@ function moveTypeQuestion(type, qid, delta, button){
   if(delta < 0) list.insertBefore(rows[index], rows[target]);
   else list.insertBefore(rows[index], rows[target].nextSibling);
   syncQuestionOrder(type);
-  markTypeDirty(type);
+  queueQuestionSave(type);
   if(button) button.focus();
 }
 function sortSelectedQuestions(type){
@@ -1479,7 +1492,7 @@ function sortSelectedQuestions(type){
   }
   rows.forEach(function(row){ list.appendChild(row); });
   syncQuestionOrder(type);
-  if(rows.length > 1) markTypeDirty(type);
+  if(rows.length > 1) queueQuestionSave(type);
   quickTip('已按当前规则重排已选题目');
 }
 function filterQuestionBank(type){
@@ -1514,19 +1527,6 @@ function sortQuestionBank(type){
     return aid - bid;
   });
   rows.forEach(function(row){ table.appendChild(row); });
-}
-
-function saveCurrentQuestions(){
-  if(CONFIG_LOCKED) return;
-  var type = document.getElementById('currentTab').value;
-  syncQuestionOrder(type);
-  if(type === 'practice'){
-    // 实操任务从题库装入时已即时保存；这里保存题型、要求和旧版兼容字段。
-    submitMain('/exam/{{ exam.id }}', {save_mode:'questions', tab:type});
-    return;
-  }
-  if(THEORY_TABS.indexOf(type) < 0) return;
-  submitMain('/exam/{{ exam.id }}/questions/' + type, {tab:type});
 }
 
 /* 题型开关：勾上 → 标签按钮亮绿点、页面内容恢复正常亮度；
@@ -1727,7 +1727,7 @@ function toggleTypeAll(type, on){
     }
   });
   countType(type);
-  if(changed) markTypeDirty(type);
+  if(changed) queueQuestionSave(type);
 }
 
 /* 题库搜索 / 分类筛选 / 排序 */

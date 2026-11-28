@@ -20,6 +20,8 @@ import threading
 import time
 import urllib.request
 
+from ikeexam.shared.security import MAX_JSON_BYTES, normalize_origin, origin_key, read_limited
+
 # 与服务端 beacon.py 保持一致
 BEACON_PORT = 39100
 MAGIC = "EXAM-SERVER-V1"
@@ -149,7 +151,7 @@ def probe(timeout=2.0, port=BEACON_PORT, tries=2):
     Windows 防火墙一般放行。
     """
     found = {}
-    msg = json.dumps({"cmd": "discover"}).encode("utf-8")
+    msg = json.dumps({"cmd": "discover", "magic": MAGIC}).encode("utf-8")
 
     for _ in range(tries):
         s = _sock(broadcast=True, bind_port=0, timeout=0.35)
@@ -187,11 +189,12 @@ def try_url(url, timeout=2):
     if not url:
         return False
     try:
-        req = urllib.request.Request(url.rstrip("/") + "/api/ping", method="GET")
+        base = normalize_origin(url, allow_plain_http=True)
+        req = urllib.request.Request(base + "/api/ping", method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            d = json.loads(r.read().decode("utf-8"))
-            # 服务端 /api/ping 返回 service=exam
-            return bool(d.get("ok")) and d.get("service") == "exam"
+            raw = read_limited(r, MAX_JSON_BYTES)
+            d = json.loads(raw.decode("utf-8"))
+        return bool(d.get("ok")) and d.get("service") == "exam"
     except Exception:
         return False
 
@@ -224,10 +227,13 @@ def clear_cache():
 
 
 # ---------------- 总入口 ----------------
-def find_server(timeout=8, on_status=None, port=BEACON_PORT, fallback=None):
+def find_server(timeout=8, on_status=None, port=BEACON_PORT, fallback=None,
+                allowed_origins=None, allow_discovered=False):
     """
     找服务器，依次尝试：缓存 → 被动监听 → 主动探测 → 备用直连地址
     :param fallback: 实在找不到时硬试的地址（学生手动输入过的服务器地址）
+    :param allowed_origins: 已确认过的源；空列表不会自动信任发现结果
+    :param allow_discovered: 用户明确启用自动发现时，允许连接通过考试服务指纹的服务器
     :return: url 字符串，找不到返回 None
 
     注意：收到广播本身就说明服务器在网络上存在。
@@ -241,11 +247,34 @@ def find_server(timeout=8, on_status=None, port=BEACON_PORT, fallback=None):
             except Exception:
                 pass
 
+    allowed = set()
+    for value in allowed_origins or ():
+        try:
+            allowed.add(origin_key(value, allow_plain_http=True))
+        except ValueError:
+            pass
+    fallback_origin = ""
+    if fallback:
+        try:
+            fallback_origin = origin_key(fallback, allow_plain_http=True)
+            allowed.add(fallback_origin)
+        except ValueError:
+            pass
+    if not allowed and not allow_discovered:
+        say("请手动输入并确认服务器地址；不会自动连接未确认的服务器。")
+        return None
+
+    def approved(url):
+        try:
+            return origin_key(url, allow_plain_http=True) in allowed
+        except ValueError:
+            return False
+
     heard = []          # 听到过但 HTTP 不通的，留着兜底
 
     # 1. 上次连过的
     cached = load_cache()
-    if cached:
+    if cached and approved(cached):
         say(f"尝试上次连接过的 {cached} …")
         if try_url(cached, timeout=1.5):
             say(f"✅ 已连接 {cached}")
@@ -257,7 +286,7 @@ def find_server(timeout=8, on_status=None, port=BEACON_PORT, fallback=None):
     for info in listen_once(timeout=min(3.0, timeout * 0.4), port=port):
         heard.append(info)
         for url in _candidates(info):
-            if try_url(url, timeout=2):
+            if (approved(url) or allow_discovered) and try_url(url, timeout=2):
                 say(f"✅ 找到 {url}")
                 if info.get("name"):
                     say(f"   服务器名：{info['name']}")
@@ -268,16 +297,20 @@ def find_server(timeout=8, on_status=None, port=BEACON_PORT, fallback=None):
     for info in probe(timeout=min(4.0, timeout * 0.6), port=port):
         heard.append(info)
         for url in _candidates(info):
-            if try_url(url, timeout=2):
+            if (approved(url) or allow_discovered) and try_url(url, timeout=2):
                 say(f"✅ 找到 {url}")
                 return url
 
     # 4. 听到了服务器，但 HTTP 不通 —— 多半是防火墙
     if heard:
-        url = heard[0].get("http")
-        say(f"⚠️ 发现服务器 {url}，但打不开它的网页端口")
-        say("   请检查服务器防火墙是否放行 TCP 端口")
-        return url
+        url = next((info.get("http") for info in heard
+                    if approved(info.get("http")) or allow_discovered), None)
+        if not url:
+            say("发现的服务器未确认，请手动输入地址。")
+        else:
+            say(f"⚠️ 发现服务器 {url}，但打不开它的网页端口")
+            say("   请检查服务器防火墙是否放行 TCP 端口")
+            return url
 
     # 5. 最后硬试备用地址（config 里写的固定 IP）
     if fallback and fallback != cached:

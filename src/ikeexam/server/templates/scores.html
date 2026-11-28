@@ -41,6 +41,7 @@
   <a class="btn gray" href="/">{{ icon('arrow-left') }} 返回控制台</a>
 </div>
 
+<div class="table-scroll">
 <table class="score-table">
   <thead><tr>
     <th>座位</th><th>姓名</th><th>机器标识</th><th>IP</th>
@@ -77,6 +78,7 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
 </div>
 
 <!-- ================= 数据可视化 ================= -->
@@ -154,6 +156,10 @@ function rateColor(r) {
   return '#dc2626';
 }
 
+function tooltipText(value) {
+  return String(value == null ? '' : value).replace(/[{}]/g, ' ');
+}
+
 /* 1. 分数段分布 */
 (function () {
   // 五段色阶：每段对白底都 ≥3:1。
@@ -169,7 +175,7 @@ function rateColor(r) {
     formatter: function (ps) {
       var p = ps[0];
       var pct = total ? (p.value / total * 100).toFixed(1) : 0;
-      return p.name + '<br/>' + p.value + ' 人（' + pct + '%）';
+      return tooltipText(p.name) + '\n' + p.value + ' 人（' + pct + '%）';
     }
   });
 })();
@@ -221,7 +227,7 @@ function rateColor(r) {
     emptyMsg: '还没有理论题数据',
     formatter: function (ps) {
       var p = ps[0], q = QRATES[p.dataIndex] || {};
-      return p.name + '<br/>得分率 ' + p.value + '%<br/>'
+      return tooltipText(p.name) + '\n得分率 ' + p.value + '%\n'
            + '作答 ' + (q.answered || 0) + ' 人，满分 ' + (q.score || 0) + ' 分';
     }
   });
@@ -242,7 +248,7 @@ function rateColor(r) {
     emptyMsg: '还没有实操评分数据',
     formatter: function (ps) {
       var p = ps[0], c = (CRATES || [])[p.dataIndex] || {};
-      return p.name + '<br/>平均得分率 ' + p.value + '%<br/>'
+      return tooltipText(p.name) + '\n平均得分率 ' + p.value + '%\n'
            + '该评分点满分 ' + (c.full || 0) + ' 分';
     }
   });
@@ -264,7 +270,7 @@ function rateColor(r) {
     name: '总分', horizontal: true, showLabel: true, colors: ['#3b82f6'],
     emptyMsg: '还没有成绩数据',
     formatter: function (ps) {
-      return ps[0].name + '<br/>总分 ' + ps[0].value;
+      return tooltipText(ps[0].name) + '\n总分 ' + ps[0].value;
     }
   });
 })();

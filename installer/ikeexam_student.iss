@@ -1,4 +1,4 @@
-; ============================================================
+﻿; ============================================================
 ;  ikee考务中心 —— 学生端安装程序（Inno Setup 6）
 ;
 ;  用 build_setup.bat 一键生成 ikeexam-setup.exe：
@@ -10,7 +10,7 @@
 ; ============================================================
 
 #define MyAppName "ikee考务中心"
-#define MyAppVersion "2.2.0"
+#define MyAppVersion "2.2.1"
 #define MyAppPublisher "小可"
 #define MyAppURL "https://www.ikee002.top/"
 #define MyAppExeName "pythonw.exe"
@@ -29,7 +29,8 @@ AppUpdatesURL={#MyAppURL}
 ; 默认装到用户目录（无需管理员权限，学生机也能装，且程序数据可写）
 ; 与老师端分开，避免两端安装/卸载时覆盖同一份 runtime。
 DefaultDirName={localappdata}\ikeexam-student
-; 旧版本曾装到 {localappdata}\ikeexam；升级时也不要复用共享目录。
+; 旧版本曾装到 {localappdata}\ikeexam；继续使用独立目录，避免两端互相覆盖 runtime。
+; 旧共享目录中的已知配置/答卷由 [Files] 以 onlyifdoesntexist 补迁，原目录始终保留。
 UsePreviousAppDir=no
 DisableProgramGroupPage=yes
 ; 学生端窗口在任务栏/开始菜单显示的名字
@@ -60,17 +61,24 @@ WelcomeLabel2=本程序将把学生端连同 Python 运行时一起安装到你�
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："
 
 [Files]
+; v1 默认装在 {localappdata}\ikeexam。先补迁旧配置和 runtime\ikee_Exam 答卷树，
+; 仅复制缺失文件，不覆盖现有内容，也不删除旧共享目录。
+Source: "{localappdata}\ikeexam\client\config.json"; DestDir: "{app}\src\ikeexam\client"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\runtime\ikee_Exam\*"; DestDir: "{app}\runtime\ikee_Exam"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\client\ikee_Exam\*"; DestDir: "{app}\runtime\ikee_Exam"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\ikee_Exam\*"; DestDir: "{app}\runtime\ikee_Exam"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+
 ; Python 嵌入式运行时（build_setup.bat 会下载并解压到 build\runtime）
 Source: "build\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion createallsubdirs
 ; 统一 src 包：学生端与共享主题
 Source: "build\src\ikeexam\client\*"; DestDir: "{app}\src\ikeexam\client"; Flags: recursesubdirs ignoreversion createallsubdirs
 Source: "build\src\ikeexam\shared\*"; DestDir: "{app}\src\ikeexam\shared"; Flags: recursesubdirs ignoreversion createallsubdirs
 Source: "build\src\ikeexam\__init__.py"; DestDir: "{app}\src\ikeexam"; Flags: ignoreversion
-Source: "close_app.ps1"; Flags: dontcopy
 
 [Dirs]
-; 学生端会在程序目录写 config.json 和 ikee_Exam，给普通用户写权限
-Name: "{app}\src\ikeexam\client"; Permissions: users-modify
+; 默认位于当前用户配置目录，账户自身可写 config、凭据和 ikee_Exam；其他用户只读。
+Name: "{app}"; Permissions: users-readexec
+Name: "{app}\src\ikeexam\client"; Permissions: users-readexec
 
 [Icons]
 Name: "{autoprograms}\iKeExam 学生端\学生端"; Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\src\ikeexam\client\exam_client.py"""; WorkingDir: "{app}\src\ikeexam\client"; IconFilename: "{app}\src\ikeexam\client\app.ico"
@@ -85,65 +93,10 @@ Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\src\ikeexam\clie
 var
   DeleteAllLocalData: Boolean;
 
-function RunCloseApp(const Helper, Root: string): Boolean;
-var
-  Params: string;
-  ResultCode: Integer;
-begin
-  Result := False;
-  if not FileExists(Helper) then
-  begin
-    MsgBox('找不到进程清理工具，无法安全关闭正在运行的软件。', mbError, MB_OK);
-    exit;
-  end;
-  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Helper +
-            '" -Root "' + Root + '"';
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-              Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-  begin
-    MsgBox('无法启动进程清理工具，请先手动关闭 ikee考务中心后重试。', mbError, MB_OK);
-    exit;
-  end;
-  if ResultCode <> 0 then
-  begin
-    MsgBox('ikee考务中心仍在运行，已停止当前操作。请手动关闭软件后重试。',
-           mbError, MB_OK);
-    exit;
-  end;
-  Result := True;
-end;
+// Inno Setup CloseApplications handles running installed applications.
+// Never execute scripts from the writable application directory.
 
-function CloseRunningApp: Boolean;
-var
-  Helper: string;
-begin
-  Helper := ExpandConstant('{app}\close_app.ps1');
-  if not FileExists(Helper) then
-  begin
-    ExtractTemporaryFile('close_app.ps1');
-    Helper := ExpandConstant('{tmp}\close_app.ps1');
-  end;
-  Result := RunCloseApp(Helper, ExpandConstant('{app}'));
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-begin
-  NeedsRestart := False;
-  Result := '';
-  if not CloseRunningApp then
-    Result := '无法关闭正在运行的 ikee考务中心，安装已取消。';
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-    if not CopyFile(ExpandConstant('{tmp}\close_app.ps1'),
-                    ExpandConstant('{app}\close_app.ps1'), False) then
-      MsgBox('进程清理工具复制失败，后续卸载时可能无法自动关闭软件。',
-             mbError, MB_OK);
-end;
-
-function CmdWantsDeleteAll: Boolean;
+function CmdWantsDeleteAll(): Boolean;
 var
   I: Integer;
 begin
@@ -160,8 +113,6 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    if not CloseRunningApp then
-      Abort;
     DeleteAllLocalData := CmdWantsDeleteAll;
     if not UninstallSilent and not DeleteAllLocalData then
     begin

@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """老师端评讲与图表窗口。"""
+import ntpath
 import os
 import tkinter as tk
 from tkinter import messagebox as mb, ttk
 
 from PIL import Image, ImageTk
 from ikeexam.shared import ui_theme
+from ikeexam.server import runtime
 
 try:
     from .visual_config import ScrollableFrame
@@ -23,6 +25,25 @@ GREEN = _UI["success"]
 ORANGE = _UI["warning"]
 RED = _UI["danger"]
 LINE = _UI["border"]
+
+
+def _safe_drawing_path(value):
+    if not isinstance(value, str) or not value or "\x00" in value:
+        return None
+    if value.startswith(("\\\\", "//")) or ntpath.splitdrive(value)[0]:
+        return None
+    if not ntpath.isabs(value) or ntpath.basename(value).count(":"):
+        return None
+    if os.path.splitext(value)[1].lower() not in (".png", ".jpg", ".jpeg"):
+        return None
+    try:
+        root = os.path.realpath(os.path.join(runtime.UPLOAD_DIR, "drawing"))
+        path = os.path.realpath(value)
+        if os.path.commonpath((root, path)) != root:
+            return None
+    except (OSError, ValueError):
+        return None
+    return path
 
 
 def _iconify(win):
@@ -77,8 +98,8 @@ class ReviewWindow:
         self.top = tk.Toplevel(main.root)
         self.top.title(f"试卷评讲 · {exam.get('title', '')}")
         self.top.transient(main.root)
-        self.top.geometry("1120x740")
-        self.top.minsize(940, 620)
+        self.top.geometry("1200x780")
+        self.top.minsize(1000, 660)
         self.top.configure(bg=BG)
         _iconify(self.top)
         self.top.protocol("WM_DELETE_WINDOW", self._close)
@@ -86,7 +107,7 @@ class ReviewWindow:
         self._load()
 
     def _build(self):
-        outer = ttk.Frame(self.top, padding=12)
+        outer = ttk.Frame(self.top, padding=16)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(2, weight=1)
@@ -139,7 +160,7 @@ class ReviewWindow:
             frame, ("no", "type", "category", "stem", "right", "wrong", "blank",
                     "rate", "answer"),
             ("题号", "题型", "分类", "题干", "做对", "做错", "没答", "正确率", "答案"),
-            (48, 72, 90, 430, 48, 48, 48, 66, 260), stretch="stem")
+            (52, 76, 96, 430, 58, 58, 58, 80, 260), stretch="stem")
         holder.grid(row=0, column=0, sticky="nsew")
         self.theory_tree.bind("<<TreeviewSelect>>", lambda event: self._theory_detail())
         self.theory_tree.bind("<Double-1>", lambda event: self._toggle_answer())
@@ -183,7 +204,9 @@ class ReviewWindow:
         scroll = ScrollableFrame(frame)
         scroll.pack(fill="both", expand=True)
         self.drawing_area = scroll.inner
-        self.drawing_area.columnconfigure(0, weight=1)
+        for column in range(3):
+            self.drawing_area.columnconfigure(column, weight=1)
+        self.drawing_area.rowconfigure(0, weight=1)
 
     def _load(self):
         if self.app.busy:
@@ -359,17 +382,20 @@ class ReviewWindow:
             widget.destroy()
         self.drawing_photos = []
         if not drawings:
-            ttk.Label(self.drawing_area, text="还没有同学提交画图作品。",
-                      style="Muted.TLabel").grid(row=0, column=0, pady=24)
+            ttk.Label(self.drawing_area, text="还没有同学提交画图作品。\n学生完成画板或拼豆后，作品会显示在这里。",
+                      style="Muted.TLabel", justify="center").grid(
+                          row=0, column=0, columnspan=3, sticky="nsew", pady=48)
             return
         for index, drawing in enumerate(drawings):
             card = ttk.Frame(self.drawing_area, padding=8)
-            card.grid(row=index // 3, column=index % 3, sticky="nw", padx=8, pady=8)
-            path = drawing.get("saved_path") or ""
+            card.grid(row=index // 3, column=index % 3, sticky="nsew", padx=8, pady=8)
+            self.drawing_area.rowconfigure(index // 3, weight=1)
+            path = _safe_drawing_path(drawing.get("saved_path"))
             photo = None
-            if path and os.path.isfile(path):
+            if path:
                 try:
-                    image = Image.open(path).convert("RGB")
+                    with Image.open(path) as source:
+                        image = source.convert("RGB")
                     image.thumbnail((240, 160), Image.Resampling.LANCZOS)
                     photo = ImageTk.PhotoImage(image)
                 except Exception:
@@ -391,13 +417,17 @@ class ReviewWindow:
         win = tk.Toplevel(self.top)
         win.title(f"作品 · {drawing.get('name') or drawing.get('hostname') or ''}")
         win.configure(bg=BG)
-        path = drawing.get("saved_path") or ""
-        if path and os.path.isfile(path):
-            image = Image.open(path).convert("RGB")
-            image.thumbnail((1000, 700), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(image)
-            win._photo = photo
-            tk.Label(win, image=photo, bg=CARD).pack(padx=16, pady=16)
+        path = _safe_drawing_path(drawing.get("saved_path"))
+        if path:
+            try:
+                with Image.open(path) as source:
+                    image = source.convert("RGB")
+                image.thumbnail((1000, 700), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(image)
+                win._photo = photo
+                tk.Label(win, image=photo, bg=CARD).pack(padx=16, pady=16)
+            except Exception:
+                ttk.Label(win, text="原图不存在或无法读取。").pack(padx=24, pady=24)
         else:
             ttk.Label(win, text="原图不存在或无法读取。").pack(padx=24, pady=24)
         ttk.Button(win, text="关闭", command=win.destroy).pack(pady=(0, 14))
@@ -411,7 +441,7 @@ class ReviewWindow:
 
 class BarChart(tk.Canvas):
     def __init__(self, master, title, items, horizontal=False, suffix="", **kwargs):
-        super().__init__(master, bg=CARD, highlightthickness=0, height=260, **kwargs)
+        super().__init__(master, bg=CARD, highlightthickness=0, height=220, **kwargs)
         self.title = title
         self.items = list(items or [])
         self.horizontal = horizontal
@@ -422,8 +452,9 @@ class BarChart(tk.Canvas):
         self.delete("all")
         width = max(self.winfo_width(), 320)
         height = max(self.winfo_height(), 220)
-        self.create_text(16, 18, text=self.title, anchor="w", fill=INK,
-                         font=(FONT, 11, "bold"))
+        if self.title:
+            self.create_text(16, 18, text=self.title, anchor="w", fill=INK,
+                             font=(FONT, 11, "bold"))
         if not self.items:
             self.create_text(width / 2, height / 2, text="暂无数据", fill=GRAY,
                              font=(FONT, 10))
@@ -481,8 +512,8 @@ class ChartsWindow:
         self.top = tk.Toplevel(main.root)
         self.top.title(f"成绩图表 · {exam.get('title', '')}")
         self.top.transient(main.root)
-        self.top.geometry("1120x740")
-        self.top.minsize(940, 620)
+        self.top.geometry("1200x780")
+        self.top.minsize(1000, 660)
         self.top.configure(bg=BG)
         _iconify(self.top)
         self.top.protocol("WM_DELETE_WINDOW", self._close)
@@ -491,7 +522,7 @@ class ChartsWindow:
         self._schedule_refresh()
 
     def _build(self):
-        outer = ttk.Frame(self.top, padding=12)
+        outer = ttk.Frame(self.top, padding=16)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(2, weight=1)
@@ -549,9 +580,11 @@ class ChartsWindow:
             ("优秀率", f"{summary.get('good_rate', 0)}%", ORANGE),
             ("最高分", summary.get("max", 0), BLUE),
         ]
+        card_styles = ("Mint.TFrame", "Sky.TFrame", "Lemon.TFrame",
+                       "Mint.TFrame", "Coral.TFrame", "Lavender.TFrame")
         for index, (label, value, color) in enumerate(stats):
-            card = ttk.Frame(self.summary, padding=8)
-            card.grid(row=0, column=index, sticky="ew", padx=4)
+            card = ttk.Frame(self.summary, style=card_styles[index], padding=10)
+            card.grid(row=0, column=index, sticky="ew", padx=5)
             ttk.Label(card, text=str(value), font=(FONT, 16, "bold"),
                       foreground=color).pack()
             ttk.Label(card, text=label, style="Muted.TLabel").pack()
@@ -595,9 +628,11 @@ class ChartsWindow:
         ])
 
     def _chart_card(self, row, column, title, items, horizontal=False, suffix=""):
-        frame = ttk.LabelFrame(self.chart_area, text=title, padding=6)
-        frame.grid(row=row, column=column, sticky="nsew", padx=6, pady=6)
-        chart = BarChart(frame, title, items, horizontal=horizontal, suffix=suffix)
+        frame = ttk.LabelFrame(self.chart_area, text=title, style="Card.TLabelframe",
+                               padding=10)
+        frame.grid(row=row, column=column, sticky="nsew", padx=8, pady=8)
+        self.chart_area.rowconfigure(row, weight=1)
+        chart = BarChart(frame, "", items, horizontal=horizontal, suffix=suffix)
         chart.pack(fill="both", expand=True)
 
     def _schedule_refresh(self):

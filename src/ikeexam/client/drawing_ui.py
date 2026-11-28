@@ -612,31 +612,39 @@ class DrawingPanel(tk.Frame, AutoSaveMixin):
 
     # ---------- 界面 ----------
     def _build_toolbar(self):
-        bar = tk.Frame(self, bg=BG)
-        bar.pack(fill="x", padx=12, pady=(8, 2))
+        toolbar = tk.Frame(self, bg=BG)
+        toolbar.pack(fill="x", padx=12, pady=(8, 2))
+        left = tk.Frame(toolbar, bg=BG)
+        left.pack(side="left", fill="x", expand=True)
+        tools = tk.Frame(left, bg=BG)
+        tools.pack(fill="x")
         self.tool_btns = {}
         for key, label in TOOLS:
-            b = tk.Button(bar, text=label, command=lambda k=key: self._set_tool(k),
-                          bg="white", fg=INK, font=(FONT, 10), padx=8, pady=3,
+            b = tk.Button(tools, text=label, command=lambda k=key: self._set_tool(k),
+                          bg="white", fg=INK, font=(FONT, 10), padx=7, pady=3,
                           relief="solid", bd=1, cursor="hand2")
             b.pack(side="left", padx=2)
             self.tool_btns[key] = b
-        tk.Label(bar, text="  颜色", bg=BG, fg=GRAY,
-                 font=(FONT, 10)).pack(side="left", padx=(12, 2))
+        styles = tk.Frame(left, bg=BG)
+        styles.pack(fill="x", pady=(4, 0))
+        tk.Label(styles, text="颜色", bg=BG, fg=GRAY,
+                 font=(FONT, 10)).pack(side="left", padx=(0, 4))
         self.color_btns = []
         for c in PALETTE:
-            b = tk.Button(bar, bg=c, width=2, command=lambda cc=c: self._set_color(cc),
+            b = tk.Button(styles, bg=c, width=2, command=lambda cc=c: self._set_color(cc),
                           relief="solid", bd=1, cursor="hand2",
                           activebackground=c)
             b.pack(side="left", padx=1)
             self.color_btns.append((c, b))
-        tk.Label(bar, text="  线宽", bg=BG, fg=GRAY,
-                 font=(FONT, 10)).pack(side="left", padx=(12, 2))
+        tk.Label(styles, text="线宽", bg=BG, fg=GRAY,
+                 font=(FONT, 10)).pack(side="left", padx=(12, 4))
         for w in (2, 3, 5):
-            tk.Button(bar, text=str(w), command=lambda ww=w: self._set_width(ww),
+            tk.Button(styles, text=str(w), command=lambda ww=w: self._set_width(ww),
                       bg="white", font=(FONT, 10), width=2, relief="solid",
                       bd=1, cursor="hand2").pack(side="left", padx=1)
-        self._build_save_cluster(bar)      # 右上角：上一题 / 保存 / 保存指示灯
+        actions = tk.Frame(toolbar, bg=BG)
+        actions.pack(side="right", padx=(8, 0))
+        self._build_save_cluster(actions)
 
     def _build_comp_panel(self, body):
         panel = tk.Frame(body, bg=CARD, width=150, highlightthickness=1,

@@ -116,12 +116,12 @@ db.set_roster(eid, [("1", "受害者"), ("2", "攻击者")])
 
 print("== 5. 命令逐机器 ACK ==")
 c1 = db.push_command("all", "pause", {"exam_id": eid})
-check("两台机器都收到命令", bool(db.fetch_commands("PC-VICTIM"))
-      and bool(db.fetch_commands("PC-ATTACKER")))
-check("重复拉取在 ACK 前仍下发", any(x["id"] == c1 for x in db.fetch_commands("PC-VICTIM")))
+check("两台机器都收到命令", bool(db.fetch_commands("PC-VICTIM", eid, "theory"))
+      and bool(db.fetch_commands("PC-ATTACKER", eid, "theory")))
+check("重复拉取在 ACK 前仍下发", any(x["id"] == c1 for x in db.fetch_commands("PC-VICTIM", eid, "theory")))
 db.ack_commands("PC-VICTIM", [c1])
-check("第一台确认后第二台仍待确认", any(x["id"] == c1 for x in db.fetch_commands("PC-ATTACKER")))
-check("第一台确认后不再收到", not any(x["id"] == c1 for x in db.fetch_commands("PC-VICTIM")))
+check("第一台确认后第二台仍待确认", any(x["id"] == c1 for x in db.fetch_commands("PC-ATTACKER", eid, "theory")))
+check("第一台确认后不再收到", not any(x["id"] == c1 for x in db.fetch_commands("PC-VICTIM", eid, "theory")))
 db.ack_commands("PC-ATTACKER", [c1])
 c = db.conn()
 status = c.execute("SELECT status FROM commands WHERE id=?", (c1,)).fetchone()[0]
@@ -148,6 +148,48 @@ if "先来的" in rows and "后来的" in rows:
           rows["先来的"]["theory"] == 2 and rows["后来的"]["theory"] == 0, rows)
     check("参与者 ID 不同", rows["先来的"]["participant_id"] != rows["后来的"]["participant_id"])
 
+print("== 6a. 公开看板范围 ==")
+screen = admin.get("/screen.json").get_json()
+check("公开看板不暴露机器标识", all("hostname" not in row for row in screen.get("rows", [])))
+check("公开看板只含本场参与者", {row["name"] for row in screen.get("rows", [])}
+      >= {"受害者", "攻击者", "先来的", "后来的"}, screen.get("rows"))
+
+print("== 6b. 已结束考试换考生不再回填旧身份 ==")
+db.set_exam_status(eid, "stopped")
+swap_eid = db.create_exam({"title": "换考生回归", "etype": "", "duration": 30,
+                           "theory_duration": 30})
+db.set_question_types(swap_eid, ["single"])
+db.set_exam_questions(swap_eid, [qid])
+db.set_roster(swap_eid, [("1", "旧考生"), ("2", "新考生")])
+db.set_exam_status(swap_eid, "running")
+db.set_phase(swap_eid, "theory")
+swap_client = app_mod.app.test_client()
+_, old_student = hello(swap_client, "PC-END-SWAP", "旧考生", "1")
+swap_client.post("/api/theory/submit", headers={"X-Exam-Token": old_student["token"]},
+                 json={"host": "PC-END-SWAP", "exam_id": swap_eid,
+                       "answers": {str(qid): "B"}})
+db.set_exam_status(swap_eid, "stopped")
+r, same_student = hello(swap_client, "PC-END-SWAP", "旧考生", "1",
+                        token=old_student["token"])
+check("原考生在宽限期仍恢复原身份", r.status_code == 200
+      and same_student.get("student", {}).get("name") == "旧考生"
+      and same_student.get("phase") == "ended", same_student)
+r, new_student = hello(swap_client, "PC-END-SWAP", "新考生", "2",
+                       token=old_student["token"])
+check("换考生使用新姓名座位并回到待考", r.status_code == 200
+      and new_student.get("exam") is None and new_student.get("phase") == "idle"
+      and new_student.get("student", {}).get("name") == "新考生"
+      and new_student.get("student", {}).get("seat") == "2", new_student)
+check("换考生保留机器令牌", new_student.get("token") == old_student.get("token"),
+      new_student)
+check("换考生清除旧当前参与者绑定",
+      db.current_participant("PC-END-SWAP", swap_eid) == 0)
+swap_rows = {row["name"]: row for row in db.full_report(swap_eid)
+             if row["hostname"] == "PC-END-SWAP"}
+check("换考生不删除或改写旧成绩", "旧考生" in swap_rows
+      and "新考生" not in swap_rows and swap_rows["旧考生"]["theory"] == 2,
+      swap_rows)
+
 print("== 7. 多题考试交卷人数按人统计 ==")
 pid, _is_new = db.add_practice({"name": "统计题", "etype": "word", "category": "测试",
                        "level": "基础", "materials": [], "requirement": "要求",
@@ -163,13 +205,9 @@ db.save_submission("PC-SWAP", eid, "缺卷.docx", "", 0, task_id=0,
                    participant_id=swap_pid)
 check("同一学生两条提交只算一人", db.stats(eid)["submitted"] == 1, db.stats(eid))
 
-print("== 8. GET 状态变更与公开看板 ==")
+print("== 8. GET 状态变更 ==")
 r = admin.get(f"/exam/{eid}/stop")
 check("GET 结束考试返回 405", r.status_code == 405, r.status_code)
-screen = admin.get("/screen.json").get_json()
-check("公开看板不暴露机器标识", all("hostname" not in row for row in screen.get("rows", [])))
-check("公开看板只含本场参与者", {row["name"] for row in screen.get("rows", [])}
-      >= {"受害者", "攻击者", "先来的", "后来的"}, screen.get("rows"))
 
 print("== 9. Office 上传内容校验 ==")
 buf = io.BytesIO()

@@ -2,6 +2,7 @@
 {% block title %}学生机{% endblock %}
 {% block body %}
 <style>
+.wrap{z-index:2}
 .resizable-scroll{max-width:100%;overflow:auto;scrollbar-gutter:stable}
 .resizable-table{table-layout:fixed}
 .resizable-table th{position:relative}
@@ -31,7 +32,7 @@ body.table-resizing,body.table-resizing *{cursor:col-resize!important;user-selec
     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
     <button class="btn red" type="submit">清空列表</button>
   </form>
-  <span class="muted">右键学生机行可查看详情、重置机器令牌或刷新；拖动表头分隔线调整列宽，双击表头自适应。</span>
+  <span class="muted">右键学生机行可查看详情、修改学生信息、重置机器令牌或刷新；拖动表头分隔线调整列宽，双击表头自适应。</span>
 </div>
 <div class="scroll resizable-scroll" tabindex="0" aria-label="学生机列表，可横向滚动">
 <table id="students-table" class="resizable-table" data-resizable
@@ -94,6 +95,7 @@ body.table-resizing,body.table-resizing *{cursor:col-resize!important;user-selec
      style="display:none;position:fixed;z-index:130">
   <b id="studentMenuTitle" style="display:block;padding:6px 10px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></b>
   <button class="btn sm ghost" role="menuitem" data-student-action="details">详情</button>
+  <button class="btn sm ghost" role="menuitem" data-student-action="edit">修改学生信息</button>
   <button class="btn sm orange" role="menuitem" data-student-action="reset">重置机器令牌</button>
   <button class="btn sm ghost" role="menuitem" data-student-action="refresh">刷新</button>
 </div>
@@ -115,6 +117,29 @@ body.table-resizing,body.table-resizing *{cursor:col-resize!important;user-selec
   <div style="display:flex;justify-content:flex-end">
     <button type="button" class="btn ghost sm" onclick="closeStudentDetail()">关闭</button>
   </div>
+</div>
+
+<div id="studentEditMask" class="modal-mask student-detail-mask"
+     onclick="if(event.target===this)closeStudentEdit()"></div>
+<div id="studentEditBox" class="modal-card student-detail-box" role="dialog" aria-modal="true"
+     aria-labelledby="studentEditTitle" style="display:none;max-width:460px">
+  <h2 id="studentEditTitle" style="margin:0 0 8px;font-size:17px">修改学生信息</h2>
+  <p class="muted" id="studentEditHostname" style="margin:0 0 12px"></p>
+  <form id="studentEditForm" method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label style="display:block;margin-bottom:10px">姓名
+      <input id="studentEditName" name="name" required maxlength="30"
+             style="width:100%;margin-top:5px">
+    </label>
+    <label style="display:block;margin-bottom:16px">座位号
+      <input id="studentEditSeat" name="seat" maxlength="20"
+             style="width:100%;margin-top:5px">
+    </label>
+    <div style="display:flex;justify-content:flex-end">
+      <button type="button" class="btn ghost sm" onclick="closeStudentEdit()">取消</button>
+      <button class="btn green sm" type="submit">保存修改</button>
+    </div>
+  </form>
 </div>
 
 <script>
@@ -162,10 +187,26 @@ function closeStudentDetail(){
   document.getElementById('studentDetailMask').style.display = 'none';
   document.getElementById('studentDetailBox').style.display = 'none';
 }
+function showStudentEdit(){
+  var row = document.querySelector('#students-table tbody tr[data-student-id="' + MENU_STUDENT_ID + '"]');
+  if(!row) return;
+  document.getElementById('studentEditForm').action = '/students/' + MENU_STUDENT_ID + '/update';
+  document.getElementById('studentEditHostname').textContent = '机器标识：' + (row.getAttribute('data-hostname') || '-');
+  document.getElementById('studentEditName').value = row.getAttribute('data-name') || '';
+  document.getElementById('studentEditSeat').value = row.getAttribute('data-seat') || '';
+  document.getElementById('studentEditMask').style.display = 'block';
+  document.getElementById('studentEditBox').style.display = 'block';
+  document.getElementById('studentEditName').focus();
+}
+function closeStudentEdit(){
+  document.getElementById('studentEditMask').style.display = 'none';
+  document.getElementById('studentEditBox').style.display = 'none';
+}
 function runStudentMenuAction(action){
   var id = MENU_STUDENT_ID;
   closeStudentMenu();
   if(action === 'details') showStudentDetails();
+  else if(action === 'edit') showStudentEdit();
   else if(action === 'reset') postStudentAction('/students/' + id + '/reset-token', '重置后该机器需要重新连接？');
   else if(action === 'refresh') window.location.reload();
 }
@@ -176,7 +217,7 @@ document.addEventListener('click', function(event){
 });
 document.addEventListener('keydown', function(event){
   if(event.key !== 'Escape') return;
-  closeStudentMenu(); closeStudentDetail();
+  closeStudentMenu(); closeStudentDetail(); closeStudentEdit();
 });
 window.addEventListener('resize', closeStudentMenu);
 window.addEventListener('scroll', closeStudentMenu, true);

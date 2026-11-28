@@ -11,7 +11,7 @@
 ; ============================================================
 
 #define MyAppName "ikee考务中心（老师端）"
-#define MyAppVersion "2.2.0"
+#define MyAppVersion "2.2.1"
 #define MyAppPublisher "小可"
 #define MyAppURL "https://www.ikee002.top/"
 #define MyAppExeName "pythonw.exe"
@@ -29,7 +29,8 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 ; 与老师端分开，避免两端安装/卸载时覆盖同一份 runtime。
 DefaultDirName={localappdata}\ikeexam-teacher
-; 旧版本曾装到 {localappdata}\ikeexam；升级时也不要复用共享目录。
+; 旧版本曾装到 {localappdata}\ikeexam；继续使用独立目录，避免两端互相覆盖 runtime。
+; 旧共享目录中的已知数据由 [Files] 以 onlyifdoesntexist 补迁，原目录始终保留。
 UsePreviousAppDir=no
 DisableProgramGroupPage=yes
 OutputDir=.
@@ -57,6 +58,26 @@ WelcomeLabel2=本程序会一并安装老师端桌面软件、服务端后台与
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："
 
 [Files]
+; v1 默认装在 {localappdata}\ikeexam。先补迁旧数据，再安装新文件与种子资源；
+; 所有目标均只在缺失时复制，绝不覆盖既有数据，也不删除旧共享目录。
+Source: "{localappdata}\ikeexam\exam.db"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\exam.db-wal"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\exam.db-shm"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\auth.json"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\auth.json.bak"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\secret.key"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\server\auth.json"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\server\auth.json.bak"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\server\secret.key"; DestDir: "{app}"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\teacher\config.json"; DestDir: "{app}\src\ikeexam\teacher"; Flags: external skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\uploads\*"; DestDir: "{app}\uploads"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\exams\*"; DestDir: "{app}\exams"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\logs\*"; DestDir: "{app}\logs"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\server\logs\*"; DestDir: "{app}\logs"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\题库\*"; DestDir: "{app}\题库"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\materials\*"; DestDir: "{app}\materials"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+Source: "{localappdata}\ikeexam\qimg\*"; DestDir: "{app}\qimg"; Flags: external recursesubdirs createallsubdirs skipifsourcedoesntexist onlyifdoesntexist
+
 ; Python 运行时（含 flask / openpyxl 等全部依赖）
 Source: "build\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion createallsubdirs
 ; 统一 src 包：服务端、老师端、评分器与共享模块
@@ -65,15 +86,15 @@ Source: "build\src\ikeexam\teacher\*"; DestDir: "{app}\src\ikeexam\teacher"; Fla
 Source: "build\src\ikeexam\graders\*"; DestDir: "{app}\src\ikeexam\graders"; Flags: recursesubdirs ignoreversion createallsubdirs
 Source: "build\src\ikeexam\shared\*"; DestDir: "{app}\src\ikeexam\shared"; Flags: recursesubdirs ignoreversion createallsubdirs
 Source: "build\src\ikeexam\__init__.py"; DestDir: "{app}\src\ikeexam"; Flags: ignoreversion
-Source: "close_app.ps1"; Flags: dontcopy
-; 内置题库、实操素材与题目图片，保持与 runtime.py 的目录规则一致
-Source: "build\题库\*"; DestDir: "{app}\题库"; Flags: recursesubdirs ignoreversion createallsubdirs
-Source: "build\materials\*"; DestDir: "{app}\materials"; Flags: recursesubdirs ignoreversion createallsubdirs
-Source: "build\qimg\*"; DestDir: "{app}\qimg"; Flags: recursesubdirs ignoreversion createallsubdirs
+; 内置题库、实操素材与题目图片是可写数据：仅补缺，重装/升级不得覆盖教师修改。
+Source: "build\题库\*"; DestDir: "{app}\题库"; Flags: recursesubdirs ignoreversion createallsubdirs onlyifdoesntexist
+Source: "build\materials\*"; DestDir: "{app}\materials"; Flags: recursesubdirs ignoreversion createallsubdirs onlyifdoesntexist
+Source: "build\qimg\*"; DestDir: "{app}\qimg"; Flags: recursesubdirs ignoreversion createallsubdirs onlyifdoesntexist
 
 [Dirs]
-Name: "{app}"; Permissions: users-modify
-Name: "{app}\src\ikeexam\teacher"; Permissions: users-modify
+; 默认位于当前用户配置目录，账户自身已有完全控制权；其他用户只读，避免改写凭据/源码。
+Name: "{app}"; Permissions: users-readexec
+; 资源仍供教师及其他本机使用者维护；凭据与运行源码不授予 Users 写权限。
 Name: "{app}\题库"; Permissions: users-modify
 Name: "{app}\materials"; Permissions: users-modify
 Name: "{app}\qimg"; Permissions: users-modify
@@ -91,65 +112,10 @@ Filename: "{app}\runtime\{#MyAppExeName}"; Parameters: """{app}\src\ikeexam\teac
 var
   DeleteAllLocalData: Boolean;
 
-function RunCloseApp(const Helper, Root: string): Boolean;
-var
-  Params: string;
-  ResultCode: Integer;
-begin
-  Result := False;
-  if not FileExists(Helper) then
-  begin
-    MsgBox('找不到进程清理工具，无法安全关闭正在运行的软件。', mbError, MB_OK);
-    exit;
-  end;
-  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Helper +
-            '" -Root "' + Root + '"';
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-              Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-  begin
-    MsgBox('无法启动进程清理工具，请先手动关闭 ikee考务中心后重试。', mbError, MB_OK);
-    exit;
-  end;
-  if ResultCode <> 0 then
-  begin
-    MsgBox('ikee考务中心仍在运行，已停止当前操作。请手动关闭软件后重试。',
-           mbError, MB_OK);
-    exit;
-  end;
-  Result := True;
-end;
+// Inno Setup CloseApplications handles running installed applications.
+// Never execute scripts from the writable application directory.
 
-function CloseRunningApp: Boolean;
-var
-  Helper: string;
-begin
-  Helper := ExpandConstant('{app}\close_app.ps1');
-  if not FileExists(Helper) then
-  begin
-    ExtractTemporaryFile('close_app.ps1');
-    Helper := ExpandConstant('{tmp}\close_app.ps1');
-  end;
-  Result := RunCloseApp(Helper, ExpandConstant('{app}'));
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-begin
-  NeedsRestart := False;
-  Result := '';
-  if not CloseRunningApp then
-    Result := '无法关闭正在运行的 ikee考务中心，安装已取消。';
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-    if not CopyFile(ExpandConstant('{tmp}\close_app.ps1'),
-                    ExpandConstant('{app}\close_app.ps1'), False) then
-      MsgBox('进程清理工具复制失败，后续卸载时可能无法自动关闭软件。',
-             mbError, MB_OK);
-end;
-
-function CmdWantsDeleteAll: Boolean;
+function CmdWantsDeleteAll(): Boolean;
 var
   I: Integer;
 begin
@@ -166,8 +132,6 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    if not CloseRunningApp then
-      Abort;
     DeleteAllLocalData := CmdWantsDeleteAll;
     if not UninstallSilent and not DeleteAllLocalData then
     begin

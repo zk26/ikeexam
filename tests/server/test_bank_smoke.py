@@ -289,9 +289,10 @@ _initial_row = re.search(r'<tr[^>]*data-qid="%s"[^>]*>.*?</tr>' % single_qs[0]["
 check("题库复选框初始反映本场已选题",
       bool(_initial_row) and 'checked' in _initial_row.group(0),
       _initial_row.group(0)[:180] if _initial_row else "未找到题目行")
-check("选题页底部按钮与 dirty 拦截已实现",
-      'id="saveQuestionsBtn"' in ed and "返回基本设置" in ed
-      and "var DIRTY" in ed and "还有未保存的选题改动" in ed)
+check("选题页自动保存且底部按钮已移除",
+      'id="saveQuestionsBtn"' not in ed and "返回基本设置" not in ed
+      and "queueQuestionSave" in ed and "saveQuestionType" in ed
+      and "选题会自动保存" in ed)
 check("选题滚动容器支持 hover/focus 滚轮",
       'class="scroll exam-scroll" tabindex="0"' in ed
       and "enableExamScrollWheel" in ed and "overscroll-behavior:auto" in ed)
@@ -470,7 +471,14 @@ _r_web = api2.post(f"/exam/{web_eid}/questions/single",
 check("锁定考试拒绝保存选题",
       _r_web.status_code == 302 and db.exam_question_ids(web_eid) == _before_locked,
       str(db.exam_question_ids(web_eid)))
-db.set_exam_status(web_eid, "idle")
+# 已开始的考试不能回退为草稿；后续编辑流程用另一场草稿验证。
+web_eid = db.create_exam({"title": "网页选题同步-编辑", "etype": "", "duration": 45,
+                          "theory_duration": 45, "requirement": "",
+                          "save_as": "", "require_complete": 0})
+db.set_question_types(web_eid, ["single", "multi", "judge", "blank", "drag", "code"])
+db.set_exam_questions(web_eid, _web_original)
+_web_html = api2.get(f"/exam/{web_eid}").get_data(as_text=True)
+_web_tok = (re.search(r'name="_csrf" value="([^"]+)"', _web_html) or [None, ""])[1]
 _before_other = [qid for qid in db.exam_question_ids(web_eid)
                  if db.get_question(qid)["qtype"] != "single"]
 _r_web = api2.post(f"/exam/{web_eid}/random",
@@ -529,7 +537,7 @@ db.set_exam_status(eid4, "running")
 r13 = api2.post(f"/exam/{eid4}/quickset", headers={"X-CSRF-Token": _tok},
                 json={"types": ["single"]}).get_json()
 check("考试进行中拒绝即时保存", not r13.get("ok"), str(r13)[:120])
-db.set_exam_status(eid4, "idle")
+check("进行中考试不能回退为草稿", db.get_exam(eid4)["status"] == "running")
 
 print("== 14. 姓名拼音标注（打名字测试）==")
 r14 = api2.post(f"/exam/{eid}/pinyin", headers={"X-CSRF-Token": _tok},
@@ -635,9 +643,14 @@ if _row:
     check("指令发给全体学生", _row["target"] == "all", str(_row["target"]))
 check("考试状态已置为结束", db.get_exam(eid4)["status"] == "stopped")
 check("阶段已置为 ended", db.get_phase(eid4) == "ended")
-# 不清理登录信息的那一版
-db.set_exam_status(eid4, "running")
-api2.post(f"/exam/{eid4}/stop", data={"_csrf": _tok, "clear_login": "0"})
+# 结束过的考试不能重新开考；用一场新考试验证另一种收卷参数。
+eid4b = db.create_exam({"title": "保留登录收卷", "etype": "", "duration": 30,
+                        "theory_duration": 30})
+db.set_question_types(eid4b, ["single"])
+db.set_exam_questions(eid4b, [db.list_questions(qtype="single")[0]["id"]])
+db.set_exam_status(eid4b, "running")
+db.set_phase(eid4b, "theory")
+api2.post(f"/exam/{eid4b}/stop", data={"_csrf": _tok, "clear_login": "0"})
 _c = db.conn()
 _row = _c.execute("""SELECT payload FROM commands
                      WHERE ctype='force_exit' ORDER BY id DESC LIMIT 1""").fetchone()

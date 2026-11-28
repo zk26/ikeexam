@@ -78,6 +78,8 @@ APP_FILES = (
     "src/ikeexam/__init__.py",
     "src/ikeexam/shared/ui_theme.py",
     "src/ikeexam/shared/config_schema.py",
+    "src/ikeexam/shared/security.py",
+    "src/ikeexam/shared/outbox.py",
     "src/ikeexam/teacher/teacher_app.py",
     "src/ikeexam/teacher/api.py",
     "src/ikeexam/teacher/app.ico",

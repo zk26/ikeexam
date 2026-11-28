@@ -142,16 +142,17 @@ def add_hard_shadow(widget, offset=6, color=None):
 class MemphisBanner(tk.Canvas):
     """奶油色几何横幅：太阳、波浪、圆点与硬阴影标题牌。"""
 
-    def __init__(self, master, title="", subtitle="", height=92, tokens=None, **kwargs):
+    def __init__(self, master, title="", subtitle="", height=92, tokens=None,
+                 title_size=20, subtitle_size=11, **kwargs):
         self.tokens = tokens or getattr(master, "_ui_tokens", LIGHT)
         super().__init__(master, height=height, bg=self.tokens["bg"],
                          highlightthickness=0, bd=0, **kwargs)
         self.title = title
         self.subtitle = subtitle
         family = pick_family(self)
-        self._title_font = tkfont.Font(root=self, family=family, size=-20,
+        self._title_font = tkfont.Font(root=self, family=family, size=-title_size,
                                        weight="bold")
-        self._sub_font = tkfont.Font(root=self, family=family, size=-11)
+        self._sub_font = tkfont.Font(root=self, family=family, size=-subtitle_size)
         self.bind("<Configure>", lambda event: self._draw())
 
     @staticmethod
@@ -211,9 +212,9 @@ class MemphisBanner(tk.Canvas):
                                  fill=tokens["purple"], outline=tokens["purple"])
 
 
-def apply_theme(root, mode="light"):
+def apply_theme(root, mode="light", base_size=10):
     tokens = TOKENS[mode]
-    fonts = build_fonts(root)
+    fonts = build_fonts(root, base_size=base_size)
     root._ui_tokens = tokens
     root._ui_fonts = fonts
     style = ttk.Style(root)
@@ -342,7 +343,7 @@ def apply_theme(root, mode="light"):
             ]})
         ]})
     ]
-    for tab_style in ("TNotebook.Tab", "Main.TNotebook.Tab"):
+    for tab_style in ("TNotebook.Tab", "Main.TNotebook.Tab", "Exam.TNotebook.Tab"):
         style.configure(tab_style, background=tokens["tab_bg"],
                         foreground=tokens["text"], padding=(16, 9),
                         font=bold, borderwidth=2, bordercolor=tokens["border"],
@@ -355,8 +356,7 @@ def apply_theme(root, mode="light"):
                               ("active", tokens["text"]),
                               ("disabled", tokens["disabled_fg"])],
                   bordercolor=[("selected", tokens["purple"]),
-                               ("active", tokens["border"])],
-                  expand=[("selected", (1, 1, 1, 0))])
+                               ("active", tokens["border"])])
         try:
             style.layout(tab_style, tab_layout)
         except tk.TclError:
@@ -376,12 +376,26 @@ def apply_theme(root, mode="light"):
         style.map(hd, background=[("active", tokens["heading_active"])])
     style.configure("TScrollbar", background=tokens["scroll_thumb"],
                     troughcolor=tokens["bg"], bordercolor=tokens["bg"],
-                    arrowcolor=tokens["arrow"], arrowsize=12, width=10,
+                    arrowcolor=tokens["arrow"], arrowsize=11, width=8,
                     relief="flat")
     style.map("TScrollbar",
               background=[("active", tokens["scroll_hover"]),
                           ("pressed", tokens["arrow"])],
               arrowcolor=[("active", tokens["primary"])])
+    style.configure("Thin.TScrollbar", background=tokens["scroll_thumb"],
+                    troughcolor=tokens["surface"], bordercolor=tokens["surface"],
+                    arrowcolor=tokens["arrow"], arrowsize=10, width=8,
+                    relief="flat")
+    style.map("Thin.TScrollbar",
+              background=[("active", tokens["scroll_hover"]),
+                          ("pressed", tokens["arrow"])],
+              arrowcolor=[("active", tokens["primary"])])
+    for orientation in ("Vertical", "Horizontal"):
+        try:
+            style.layout(f"{orientation}.Thin.TScrollbar",
+                         style.layout(f"{orientation}.TScrollbar"))
+        except tk.TclError:
+            pass
     for name, color in (("Accent", tokens["primary"]),
                         ("Success", tokens["success"]),
                         ("Danger", tokens["danger"])):
@@ -411,6 +425,8 @@ def apply_theme(root, mode="light"):
     for name in ("TLabelframe.Label", "Card.TLabelframe.Label"):
         style.configure(name, background=tokens["surface"],
                         foreground=tokens["text_muted"], font=small)
+    style.configure("Card.TLabelframe", relief="solid", labelmargins=(12, 6, 12, 4))
+    style.configure("Card.TLabelframe.Label", foreground=tokens["text_strong"], font=bold)
     style.configure("TSeparator", background=tokens["border"])
     style.configure("TPanedwindow", background=tokens["bg"], sashthickness=6,
                     sashrelief="flat")

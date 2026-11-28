@@ -132,13 +132,23 @@
       <button class="btn green sm">{% if to_eid %}装进这场考试{% else %}用它新建考试{% endif %}</button>
     </form>
     <form method="post" action="/practice/{{ it.id }}/del" style="display:inline"
-          onsubmit="return confirm('从实操题库删除「{{ it.name }}」？')">
+          data-delete-name="{{ it.name }}">
       <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-      <button class="btn ghost sm">删除</button>
+      <button class="btn ghost sm" type="submit">删除</button>
     </form>
   </div>
 </div>
 {% endfor %}
+
+<script>
+document.querySelectorAll('form[data-delete-name]').forEach(function (form) {
+  form.addEventListener('submit', function (event) {
+    if (!confirm('从实操题库删除「' + form.dataset.deleteName + '」？')) {
+      event.preventDefault();
+    }
+  });
+});
+</script>
 
 {% if to_eid %}
 {# 列表底部再放一次：翻到最后也不用滚回顶部才能回去 #}

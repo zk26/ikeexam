@@ -16,6 +16,12 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from ikeexam.shared.security import (MAX_EXPORT_BYTES, MAX_JSON_BYTES,
+                                     MAX_MATERIAL_BYTES, MAX_TEACHER_JSON_BYTES,
+                                     LimitError, copy_limited, normalize_origin,
+                                     open_verified, path_identity, read_limited,
+                                     safe_replace)
+
 
 class AdminAPI:
     def __init__(self, base):
@@ -34,9 +40,10 @@ class AdminAPI:
     @base.setter
     def base(self, value):
         value = (value or "").strip().rstrip("/")
+        normalized = normalize_origin(value, allow_plain_http=True)
         with self._session_lock:
-            if value != self._base:
-                self._base = value
+            if normalized != self._base:
+                self._base = normalized
                 self.csrf_token = ""
                 self.cj = http.cookiejar.CookieJar()
                 self.opener = urllib.request.build_opener(
@@ -121,7 +128,7 @@ class AdminAPI:
                 self.csrf_token = str(payload["csrf_token"])
 
     def _perform(self, method, path, body=None, headers=None, timeout=10,
-                 binary=False):
+                 binary=False, output_path=None):
         """实际执行请求；网络和解析均在此完成，可由后台线程调用。"""
         url = self.base + path
         request_headers = {"Accept": "application/json, */*"}
@@ -137,10 +144,30 @@ class AdminAPI:
                                      headers=request_headers)
         try:
             with self.opener.open(req, timeout=timeout) as response:
-                raw = response.read()
                 content_type = response.headers.get("Content-Type", "")
                 disposition = response.headers.get("Content-Disposition", "")
                 status = getattr(response, "status", 200)
+                if output_path is not None:
+                    import tempfile
+                    parent = os.path.dirname(os.path.abspath(output_path))
+                    os.makedirs(parent, exist_ok=True)
+                    fd, temporary = tempfile.mkstemp(prefix=".ikeexam-export-", dir=parent)
+                    try:
+                        with os.fdopen(fd, "wb") as stream:
+                            size = copy_limited(response, stream, MAX_EXPORT_BYTES)
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        safe_replace(temporary, output_path)
+                    finally:
+                        try:
+                            os.remove(temporary)
+                        except OSError:
+                            pass
+                    return {"ok": True, "path": output_path, "size": size,
+                            "filename": self._download_name(disposition),
+                            "content_type": content_type, "status": status}
+                raw = read_limited(response, MAX_EXPORT_BYTES if binary
+                                   else MAX_TEACHER_JSON_BYTES)
             if binary:
                 return {
                     "ok": True,
@@ -165,7 +192,7 @@ class AdminAPI:
             return payload
         except urllib.error.HTTPError as exc:
             try:
-                raw = exc.read()
+                raw = read_limited(exc, MAX_TEACHER_JSON_BYTES)
             except Exception:
                 raw = b""
             finally:
@@ -193,13 +220,16 @@ class AdminAPI:
         if data is not None:
             try:
                 body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+                if len(body) > MAX_TEACHER_JSON_BYTES:
+                    return {"ok": False, "msg": "JSON 请求超过大小限制"}
             except (TypeError, ValueError) as exc:
                 return {"ok": False, "msg": f"JSON 数据格式错误：{exc}"}
             request_headers["Content-Type"] = "application/json; charset=utf-8"
         return self._perform(method, path, body, request_headers, timeout=timeout)
 
-    def _download(self, path, timeout=60):
-        return self._perform("GET", path, timeout=timeout, binary=True)
+    def _download(self, path, timeout=60, output_path=None):
+        return self._perform("GET", path, timeout=timeout, binary=True,
+                             output_path=output_path)
 
     # ---- 基础 ----
     def ping(self, timeout=3):
@@ -213,6 +243,13 @@ class AdminAPI:
 
     def login(self, password):
         return self._req("POST", self._path("login"), {"password": password})
+
+    def change_password(self, old_password, new_password, confirm_password):
+        return self._req("POST", self._path("password"), {
+            "old_password": old_password,
+            "new_password": new_password,
+            "confirm_password": confirm_password,
+        })
 
     # ---- 总览 / 考试 ----
     def dashboard(self):
@@ -250,8 +287,11 @@ class AdminAPI:
 
     def upload_material_file(self, eid, fileobj, filename):
         """上传一个已打开的二进制文件，表单字段名为 file。"""
+        import tempfile
         boundary = "----ikee-" + uuid.uuid4().hex
         filename = os.path.basename(filename or "material")
+        if any(ch in filename for ch in '\\/:*?"<>|\x00') or filename in (".", ".."):
+            return {"ok": False, "msg": "素材文件名无效"}
         mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         quoted = urllib.parse.quote(filename, safe="")
         fallback = filename.encode("ascii", "replace").decode("ascii")
@@ -262,35 +302,46 @@ class AdminAPI:
             f'filename="{fallback}"; filename*=UTF-8\'\'{quoted}\r\n'
             f"Content-Type: {mime}\r\n\r\n"
         ).encode("ascii")
+        temporary = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
         try:
-            content = fileobj.read()
-            if isinstance(content, str):
-                content = content.encode("utf-8")
-        except Exception as exc:
+            fileobj.seek(0, os.SEEK_END)
+            size = fileobj.tell()
+            if size <= 0 or size > MAX_MATERIAL_BYTES:
+                return {"ok": False, "msg": "素材为空或超过 64 MB 限制"}
+            fileobj.seek(0)
+            temporary.write(prefix)
+            copy_limited(fileobj, temporary, MAX_MATERIAL_BYTES)
+            temporary.write(f"\r\n--{boundary}--\r\n".encode("ascii"))
+            length = temporary.tell()
+            temporary.seek(0)
+            return self._perform(
+                "POST", self._path("exam", int(eid), "materials"),
+                body=temporary,
+                headers={"Content-Type":
+                         f"multipart/form-data; boundary={boundary}",
+                         "Content-Length": str(length)},
+                timeout=60)
+        except (OSError, LimitError) as exc:
             return {"ok": False, "msg": f"读取素材失败：{exc}"}
-        body = prefix + content + f"\r\n--{boundary}--\r\n".encode("ascii")
-        return self._perform(
-            "POST", self._path("exam", int(eid), "materials"),
-            body=body,
-            headers={"Content-Type":
-                     f"multipart/form-data; boundary={boundary}"},
-            timeout=60)
+        finally:
+            temporary.close()
 
-    def upload_material(self, eid, path):
+    def upload_material(self, eid, path, identity=None):
         try:
-            with open(path, "rb") as fileobj:
+            expected = identity if identity is not None else path_identity(path)
+            with open_verified(path, expected, "rb") as fileobj:
                 return self.upload_material_file(
                     eid, fileobj, os.path.basename(path))
-        except OSError as exc:
-            return {"ok": False, "msg": f"无法打开素材文件：{exc}"}
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "msg": f"无法安全打开素材文件：{exc}"}
 
     def delete_material(self, eid, name):
         return self._req("DELETE", self._path(
             "exam", int(eid), "materials", os.path.basename(name)))
 
-    def start_exam(self, eid, klass):
+    def start_exam(self, eid, klass, passwordless=False):
         return self._req("POST", self._path("exam", int(eid), "start"),
-                         {"klass": klass})
+                         {"klass": klass, "passwordless": bool(passwordless)})
 
     def pause_exam(self, eid):
         return self._req("POST", self._path("exam", int(eid), "pause"), {})
@@ -318,20 +369,23 @@ class AdminAPI:
         return self._req("GET", self._path("exam", int(eid), "stats"),
                          timeout=30)
 
-    def export_exams(self, exam_ids, timeout=120):
+    def export_exams(self, exam_ids, timeout=120, output_path=None):
         body = json.dumps({"ids": list(exam_ids)}, ensure_ascii=False).encode("utf-8")
+        if len(body) > MAX_JSON_BYTES:
+            return {"ok": False, "msg": "导出请求超过大小限制"}
         return self._perform(
             "POST", self._path("exams", "export"), body=body,
             headers={"Content-Type": "application/json; charset=utf-8"},
-            timeout=timeout, binary=True)
+            timeout=timeout, binary=True, output_path=output_path)
 
-    def export_exam(self, eid, fmt="json", timeout=120):
+    def export_exam(self, eid, fmt="json", timeout=120, output_path=None):
         fmt = str(fmt or "json").lower()
         if fmt not in ("json", "csv", "xlsx", "zip"):
             return {"ok": False, "msg": "不支持的导出格式"}
         query = urllib.parse.urlencode({"fmt": fmt})
         return self._download(self._path("exam", int(eid), "export") +
-                              "?" + query, timeout=timeout)
+                              "?" + query, timeout=timeout,
+                              output_path=output_path)
 
     def regrade(self, eid):
         return self._req("POST", self._path("exam", int(eid), "regrade"), {},
@@ -387,6 +441,10 @@ class AdminAPI:
     # ---- 学生机 ----
     def dashboard_students(self):
         return self._req("GET", self._path("dashboard", "students"), timeout=10)
+
+    def update_student(self, hostname, name, seat):
+        return self._req("POST", self._path("students", "update"),
+                         {"hostname": hostname, "name": name, "seat": seat})
 
     def reset_student_token(self, hostname):
         return self._req("POST", self._path("students", "reset-token"),

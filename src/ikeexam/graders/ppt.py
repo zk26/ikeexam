@@ -3,7 +3,7 @@ WPS 演示（.pptx）评分器
 依赖 python-pptx
 """
 from pptx import Presentation
-from .base import BaseGrader
+from .base import BaseGrader, validate_ooxml
 
 ALIGN = {
     "左": "LEFT", "左对齐": "LEFT", "居中": "CENTER", "水平居中": "CENTER",
@@ -16,6 +16,7 @@ class PptGrader(BaseGrader):
     exts = (".pptx",)
 
     def open(self):
+        validate_ooxml(self.path)
         self.doc = Presentation(self.path)
 
     def _slides(self, r):

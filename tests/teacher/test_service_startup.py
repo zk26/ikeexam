@@ -25,7 +25,7 @@ def main():
 
         api = SimpleNamespace(ping=mock.Mock(side_effect=[
             {"ok": False, "msg": "offline"},
-            {"ok": True, "version": "2.2.0"},
+            {"ok": True, "version": "2.2.1"},
         ]))
         app = object.__new__(mod.TeacherApp)
         app.api = api

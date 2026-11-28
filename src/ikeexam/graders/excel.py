@@ -4,7 +4,7 @@ WPS 表格（.xlsx）评分器
 注意：读公式需 data_only=False，读计算结果需 data_only=True
 """
 from openpyxl import load_workbook
-from .base import BaseGrader
+from .base import BaseGrader, validate_ooxml
 
 ALIGN = {
     "左": "left", "左对齐": "left", "居中": "center", "水平居中": "center",
@@ -17,6 +17,7 @@ class ExcelGrader(BaseGrader):
     exts = (".xlsx", ".xlsm")
 
     def open(self):
+        validate_ooxml(self.path)
         # 公式版（保留公式字符串）
         self.wb_f = load_workbook(self.path, data_only=False)
         # 数值版（公式已计算的结果）

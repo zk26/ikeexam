@@ -44,6 +44,17 @@
       同一个班连考几场就都填同一个班级名。
     </p>
 
+    <label style="display:flex;align-items:flex-start;gap:10px;margin:0 0 18px;
+                  padding:12px 14px;border:2px solid var(--navy);border-radius:12px;
+                  background:var(--lavender);cursor:pointer">
+      <input type="checkbox" name="passwordless" value="1"
+             {% if exam.passwordless %}checked{% endif %}
+             style="width:20px;height:20px;flex:none;margin-top:2px">
+      <span><b>免密码考试</b><br>
+        <span class="muted">按 IP 自动识别学生，学生端直接进入考试，无需填写姓名和座位。</span>
+      </span>
+    </label>
+
     <div class="bar">
       <button class="btn green lg" type="submit">
         {{ icon('play') }} 确认开始考试</button>

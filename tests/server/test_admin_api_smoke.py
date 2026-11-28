@@ -60,6 +60,10 @@ check("修改理论题", r.status_code == 200
       and r.get_json()["question"]["stem"] == "修改后的题", r.get_json())
 r = call("POST", "/admin_api/questions/import", {"items": [dict(question, stem="导入题")]}, H)
 check("JSON 导入理论题", r.status_code == 200 and r.get_json().get("added") == 1, r.get_json())
+r = call("POST", "/admin_api/questions/import", {"items": [{"stem": "x"}] * 10001}, H)
+check("JSON 导入拒绝超条目预算", r.status_code == 413, r.get_json())
+r = call("POST", "/admin_api/questions/import", {"items": [dict(question, stem="x" * (app_mod.QUESTION_IMPORT_MAX_FIELD_BYTES + 1))]}, H)
+check("JSON 导入拒绝超长题干", r.status_code == 413, r.get_json())
 r = call("POST", "/admin_api/questions/tidy", {}, H)
 check("整理分类", r.status_code == 200 and r.get_json().get("ok"), r.get_json())
 
@@ -148,6 +152,9 @@ print("== 5. 考试控制与成绩导出 ==")
 r = call("POST", f"/admin_api/exam/{eid}/start", {"klass": "七年级1班"}, H)
 check("开始考试", r.status_code == 200
       and r.get_json()["exam"]["status"] == "running", r.get_json())
+home_html = api.get("/").get_data(as_text=True)
+check("网页考试状态显示醒目图标", "exam-list-table .tag .ic" in home_html
+      and "M7 4.5l12 7.5-12 7.5z" in home_html)
 r = call("PUT", f"/admin_api/exam/{eid}", dict(exam, title="不应保存"), H)
 check("进行中锁定配置", r.status_code == 400, r.get_json())
 r = call("POST", f"/admin_api/exam/{eid}/pause", {}, H)
@@ -158,9 +165,12 @@ r = call("POST", f"/admin_api/exam/{eid}/phase", {"phase": "practice"}, H)
 check("切换实操阶段", r.status_code == 200 and r.get_json()["exam"]["phase"] == "practice", r.get_json())
 r = call("GET", f"/admin_api/exam/{eid}/scores")
 check("成绩接口", r.status_code == 200 and "rows" in r.get_json(), r.get_json())
+scores_html = api.get(f"/scores/{eid}").get_data(as_text=True)
+check("网页成绩表独立横向滚动", 'class="table-scroll"' in scores_html)
+check("网页表头同步导航高度", '--nav-h' in scores_html)
 r = call("GET", f"/admin_api/exam/{eid}/review")
-check("评讲接口", r.status_code == 200 and "cards" in r.get_json()
-      and "task_cards" in r.get_json(), r.get_json())
+check("评讲接口", r.status_code == 200 and r.get_json().get("ok")
+      and "cards" in r.get_json() and "task_cards" in r.get_json(), r.get_json())
 r = call("GET", f"/admin_api/exam/{eid}/stats")
 check("图表接口", r.status_code == 200 and "dist" in r.get_json()
       and "questions" in r.get_json() and "rows" in r.get_json(), r.get_json())
@@ -177,9 +187,39 @@ r = call("POST", f"/admin_api/exam/{eid}/stop", {"clear_login": True}, H)
 check("结束考试", r.status_code == 200 and r.get_json()["exam"]["status"] == "stopped", r.get_json())
 
 print("== 6. 学生凭证与删除 ==")
+profile_eid = db.create_exam({"title": "资料修正考试", "etype": "", "duration": 30,
+                              "theory_duration": 30})
+db.set_question_types(profile_eid, ["single"])
+db.set_exam_status(profile_eid, "running")
+db.set_phase(profile_eid, "theory")
+db.bind_exam(profile_eid)
 db.upsert_student("PC-ADMIN", "127.0.0.1", "", name="小明", seat="01")
 r = call("POST", "/admin_api/students/reset-token", {"hostname": "PC-ADMIN"}, H)
 check("重置学生机器凭证", r.status_code == 200 and r.get_json().get("ok"), r.get_json())
+before_seen = db.get_student("PC-ADMIN").get("last_seen")
+r = call("POST", "/admin_api/students/update",
+         {"hostname": "PC-ADMIN", "name": "修正姓名", "seat": "09"}, H)
+check("老师修改学生姓名和座位", r.status_code == 200
+      and db.get_student("PC-ADMIN").get("name") == "修正姓名"
+      and db.get_student("PC-ADMIN").get("seat") == "09", r.get_json())
+check("修改资料不刷新离线时间", db.get_student("PC-ADMIN").get("last_seen") == before_seen)
+r = api.post("/api/hello", json={"host": "PC-ADMIN", "name": "小明", "seat": "01",
+                                 "ip": "127.0.0.1", "mac": ""})
+hello_data = r.get_json() or {}
+check("修改命令待确认时旧学生端不能覆盖资料", r.status_code == 200
+      and hello_data.get("student", {}).get("name") == "修正姓名"
+      and any(cmd.get("type") == "update_profile" for cmd in hello_data.get("commands", [])),
+      hello_data)
+r = api.get("/students")
+students_html = r.get_data(as_text=True)
+check("网页学生机页包含修改信息入口", r.status_code == 200
+      and 'data-student-action="edit"' in students_html
+      and 'id="studentEditForm"' in students_html)
+r = api.post(f"/students/{db.get_student('PC-ADMIN')['id']}/update",
+             data={"_csrf": csrf, "name": "网页修正", "seat": "10"})
+check("网页表单也能修改学生信息", r.status_code == 302
+      and db.get_student("PC-ADMIN").get("name") == "网页修正")
+db.delete_exam(profile_eid)
 r = call("DELETE", f"/admin_api/exam/{eid}", headers=H)
 check("已结束考试禁止删除", r.status_code == 400 and bool(db.get_exam(eid)), r.get_json())
 r = call("DELETE", f"/admin_api/question/{qid}", headers=H)

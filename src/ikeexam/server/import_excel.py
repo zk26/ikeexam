@@ -19,8 +19,10 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 try:
     from . import db
+    from .graders.base import validate_ooxml
 except ImportError:
     import db
+    from graders.base import validate_ooxml
 
 # 题型别名 -> 标准类型
 TYPE_ALIAS = {
@@ -101,7 +103,8 @@ def make_template(out_path):
 
 def parse_excel(path):
     """解析 Excel -> 题目列表"""
-    wb = load_workbook(path, data_only=True)
+    validate_ooxml(path)
+    wb = load_workbook(path, data_only=True, read_only=True)
     ws = wb.active
 
     items = []

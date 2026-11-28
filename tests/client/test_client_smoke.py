@@ -308,6 +308,46 @@ check("缺卷时调了服务端接口", mc.api.calls == [(77, 3)], str(mc.api.ca
 check("返回带缺卷标记", (info1 or {}).get("empty") is True, str(info1))
 check("缺卷的分数是 0", (info1 or {}).get("score") == 0, str(info1))
 
+import tempfile
+
+
+class _FileApi:
+    def __init__(self):
+        self.calls = []
+
+    def upload(self, exam_id, path, task_id=0):
+        self.calls.append((exam_id, path, task_id))
+        return {"ok": True, "auto": {"score": 8, "full": 10}}
+
+
+class _FileClient(exam_client.ExamClient):
+    def __init__(self):
+        self.identity = "student-1"
+        self.generation = 1
+        self.api = _FileApi()
+        self.marked = []
+        self.logs = []
+
+    def mark_submitted(self, exam_id):
+        self.marked.append(exam_id)
+
+    def _log(self, level, msg):
+        self.logs.append((level, msg))
+
+
+fd, answer_path = tempfile.mkstemp(prefix="ikeexam_answer_", suffix=".docx")
+os.close(fd)
+try:
+    fc = _FileClient()
+    ok2, info2 = fc.submit_file(77, answer_path, task_id=3)
+    check("有答卷时上传成功", ok2 is True and (info2 or {}).get("score") == 8,
+          str(info2))
+    check("有答卷时按考试编号标记已交", fc.marked == [77], str(fc.marked))
+    check("有答卷时调用上传接口", fc.api.calls == [(77, answer_path, 3)],
+          str(fc.api.calls))
+finally:
+    os.unlink(answer_path)
+
 print("== 7. 机器唯一标识 + 结束考试（强制交卷并关闭）==")
 from exam_client import Config   # noqa: E402
 
@@ -324,6 +364,8 @@ class _HelloClient(exam_client.ExamClient):
         self.state = {}
         self.logs = []
         self._stop = __import__("threading").Event()
+        self._refresh_identity = lambda: False
+        self._bind_api = lambda: None
 
     def _log(self, level, msg):
         self.logs.append((level, msg))
@@ -382,6 +424,7 @@ try:
             name = "小明"
             seat = "01"
             logged_in = True
+            passwordless = False
 
             def save(self):
                 seen["cfg_saved"] = True
@@ -399,6 +442,8 @@ try:
                 self.root = _Root()
                 self.logs = []
                 self._seen_commands = set()
+                self._prepare_identity_change = lambda: None
+                self._refresh_identity = lambda: True
 
             def practice_tasks(self):
                 return [{"task_id": 1, "name": "题一"}]

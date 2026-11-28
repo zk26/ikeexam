@@ -4,7 +4,7 @@ WPS 文字（.docx）评分器
 """
 from docx.shared import Pt  # noqa: F401 (评分点换算用)
 from docx.oxml.ns import qn
-from .base import BaseGrader
+from .base import BaseGrader, validate_ooxml
 
 # 中文字号 -> 磅值
 CN_SIZE = {
@@ -47,6 +47,7 @@ class WordGrader(BaseGrader):
 
     def open(self):
         from docx import Document
+        validate_ooxml(self.path)
         self.doc = Document(self.path)
 
     # ---------------- 取段落 ----------------

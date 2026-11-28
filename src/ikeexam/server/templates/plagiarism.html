@@ -13,6 +13,13 @@
   共 {{ n }} 份答卷，比对 {{ info.n }} 对。
   全班平均相似度 <b>{{ '%.3f'|format(info.mean) }}</b>，标准差 {{ '%.3f'|format(info.std) }}。
 </p>
+{% if info.get('status') in ('rejected', 'insufficient', 'partial') %}
+<p class="tag warn" style="padding:10px">
+  {% if info.status == 'rejected' %}答卷数或配对数超出预算，未执行比对。
+  {% elif info.status == 'insufficient' %}可比答卷不足两份。
+  {% else %}已完成 {{ info.compared }} 对，跳过 {{ info.skipped_files }} 份答卷和 {{ info.skipped_pairs }} 对；结果不完整。{% endif %}
+</p>
+{% endif %}
 
 <div class="grid">
   <div class="stat"><div class="n" style="color:var(--red)">{{ cnt.hard }}</div>
@@ -57,6 +64,8 @@
   {% endfor %}
 </table>
 </div>
+{% elif info.get('status') in ('rejected', 'insufficient') %}
+<div class="card"><p class="tag warn">当前没有可用的完整比对结果。</p></div>
 {% else %}
 <div class="card">
 <p class="tag ok" style="padding:10px;font-size:14px">{{ icon('check') }} 未发现异常相似的组合</p>

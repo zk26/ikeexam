@@ -3,8 +3,8 @@
 {% block body %}
 <style>
   body.review-big .wrap{font-size:118%}
-  .q-card{border:1px solid var(--line);border-radius:var(--r-s);padding:14px 16px;
-          margin-bottom:14px;background:#fff}
+  .q-card{border:2px solid var(--line);border-radius:var(--r-s);padding:14px 16px;
+          margin-bottom:14px;background:#fff;box-shadow:3px 3px 0 rgba(39,50,74,.12)}
   .q-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
   .q-no{font-weight:700;color:var(--brand);font-size:1.05rem}
   .ans-box{display:none;margin-top:8px;border:1px dashed var(--green);
@@ -141,7 +141,7 @@
   </div>
 </div>
 {% else %}
-<p class="muted">这场考试还没有装理论题。</p>
+<div class="empty">这场考试还没有装理论题。</div>
 {% endfor %}
 </div>
 
@@ -209,11 +209,11 @@
     </tbody>
   </table>
   {% else %}
-  <p class="muted" style="margin:2px 0 0 46px">还没有人交这份操作题。</p>
+  <div class="empty" style="margin:2px 0 0 46px">还没有人交这份操作题。</div>
   {% endif %}
 </div>
 {% endfor %}
-{% if not task_cards %}<p class="muted">这场考试还没装操作题。</p>{% endif %}
+{% if not task_cards %}<div class="empty">这场考试还没装操作题。</div>{% endif %}
 {% endif %}
 
 {% if has_typing %}
@@ -254,7 +254,7 @@
     </tbody>
   </table>
 {% else %}
-  <p class="muted" style="margin:0">还没有同学碰打字练习（练了这里会出全部人的排名）。</p>
+  <div class="empty">还没有同学碰打字练习（练了这里会出全部人的排名）。</div>
 {% endif %}
 </div>
 {% endif %}
@@ -287,7 +287,7 @@
     {% endfor %}
   </div>
 {% else %}
-  <p class="muted" style="margin:0">还没有同学提交画板作品。</p>
+  <div class="empty">还没有同学提交画板作品。</div>
 {% endif %}
 </div>
 

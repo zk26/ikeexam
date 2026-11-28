@@ -120,6 +120,7 @@ body.table-resizing,body.table-resizing *{cursor:col-resize!important;user-selec
 .exam-list-table .exam-table-actions .btn{margin:2px;padding:6px 9px;min-height:34px;font-size:11px;box-shadow:2px 2px 0 var(--navy)}
 .exam-list-table .exam-select-cell{text-align:center}
 .exam-list-table .muted{line-height:1.65}
+.exam-list-table .tag .ic{vertical-align:-3px;margin-right:4px}
 </style>
 <div class="card exam-list-card">
   <h2 style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -175,6 +176,7 @@ body.table-resizing,body.table-resizing *{cursor:col-resize!important;user-selec
       </td>
       <td>
         <span class="tag {{ 'ok' if e.status=='running' else 'warn' if e.status=='paused' else 'info' if e.status=='draft' else 'gray' }}">
+          {{ icon('play' if e.status=='running' else 'pause' if e.status=='paused' else 'clock' if e.status=='draft' else 'stop', 16) }}
           {{ '进行中' if e.status=='running' else '已暂停' if e.status=='paused' else '未开始' if e.status=='draft' else '已结束' }}
         </span>
         {% if e.status == 'stopped' %}<div class="tag gray" style="margin-top:6px">只读</div>{% endif %}
